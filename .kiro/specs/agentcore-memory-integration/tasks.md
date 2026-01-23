@@ -10,9 +10,10 @@
 - [ ] 1.2 Create memory configuration module
   - [ ] 1.2.1 Create `memory_config.py` with MemoryConfig dataclass
   - [ ] 1.2.2 Add environment variable loading with defaults
-  - [ ] 1.2.3 Define shared retrieval configuration constants
-  - [ ] 1.2.4 Define agent-specific retrieval configuration constants
-  - [ ] 1.2.5 Add configuration validation
+  - [ ] 1.2.3 Make actor_id optional (set dynamically per resource)
+  - [ ] 1.2.4 Define shared retrieval configuration constants
+  - [ ] 1.2.5 Define agent-specific retrieval configuration constants
+  - [ ] 1.2.6 Add configuration validation
 
 - [ ] 1.3 Create memory setup module
   - [ ] 1.3.1 Create `memory_setup.py` with MemoryClient wrapper
@@ -93,10 +94,12 @@
   - [ ] 4.1.1 Create `agents/pipeline_with_memory.py`
   - [ ] 4.1.2 Implement `run_pipeline_with_memory()` function
   - [ ] 4.1.3 Add pipeline run ID generation
-  - [ ] 4.1.4 Add memory configuration loading
-  - [ ] 4.1.5 Add agent factory initialization
-  - [ ] 4.1.6 Implement sequential agent execution
-  - [ ] 4.1.7 Add error handling and logging
+  - [ ] 4.1.4 Add memory configuration loading (without actor_id initially)
+  - [ ] 4.1.5 Execute discovery agent first (without memory) to get resource name
+  - [ ] 4.1.6 Set actor_id dynamically from discovery result
+  - [ ] 4.1.7 Create agent factory with resource-specific actor_id
+  - [ ] 4.1.8 Implement sequential agent execution with memory
+  - [ ] 4.1.9 Add error handling and logging
 
 - [ ] 4.2 Create agent initialization helpers
   - [ ] 4.2.1 Implement `create_discovery_agent()` helper
@@ -130,9 +133,10 @@
 - [ ] 5.2 Integration tests
   - [ ] 5.2.1 Test memory setup script
   - [ ] 5.2.2 Test agent creation with real memory stores
-  - [ ] 5.2.3 Test memory retrieval across agents
-  - [ ] 5.2.4 Test shared memory write and read
+  - [ ] 5.2.3 Test memory retrieval across agents with same actor_id
+  - [ ] 5.2.4 Test shared memory write and read for specific resource
   - [ ] 5.2.5 Test agent-specific memory isolation
+  - [ ] 5.2.6 Test different resources get different memory namespaces
 
 - [ ] 5.3 End-to-end tests
   - [ ] 5.3.1 Test full pipeline with memory enabled

@@ -25,7 +25,8 @@ This enables agents to share context during pipeline execution while maintaining
 - 1.4 Documentation agent stores Terraform code metadata that validation agent can retrieve
 - 1.5 Shared memory uses actor-level namespaces (e.g., `/facts/{actorId}`)
 - 1.6 Each agent uses a unique session ID to avoid "one agent per session" limitation
-- 1.7 All agents use the same actor ID to access shared namespaces
+- 1.7 All agents use the resource name as actor ID (e.g., `awscc_s3_bucket`) to access shared namespaces
+- 1.8 Actor ID is determined from the resource being processed in the pipeline run
 
 ### 2. Isolated Agent Learning Memory
 
@@ -66,7 +67,8 @@ This enables agents to share context during pipeline execution while maintaining
 - 4.1 Agents are created with session managers in a factory function
 - 4.2 Pipeline run ID is generated at the start of each execution
 - 4.3 Session IDs follow pattern: `{agent_name}_{pipeline_run_id}`
-- 4.4 Actor ID is consistent across all agents: `tango_pipeline`
+- 4.4 Actor ID is set to the resource name being processed (e.g., `awscc_s3_bucket`)
+- 4.5 Actor ID is extracted from discovery agent results and passed to all agents
 - 4.5 Existing agent system prompts are preserved
 - 4.6 Memory integration doesn't break existing DynamoDB/S3 storage
 - 4.7 Pipeline can run without memory if memory stores are not configured

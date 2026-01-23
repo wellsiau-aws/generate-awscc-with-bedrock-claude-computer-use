@@ -50,6 +50,9 @@ Implement a **dual-memory architecture** using Amazon Bedrock AgentCore Memory:
 ### Decision 2: Actor-Level Namespaces
 **Rationale**: Session-level namespaces (with `{sessionId}`) are not shared across sessions. Actor-level namespaces enable cross-agent memory access.
 
+### Decision 3: Resource-Specific Actor ID
+**Rationale**: Using the resource name (e.g., `awscc_s3_bucket`) as the actor ID provides resource-specific memory isolation and better semantic search relevance. Each resource type gets its own memory context.
+
 ### Decision 3: Sequential Workflow Pattern
 **Rationale**: Strands multi-agent patterns (Graph, Swarm) don't allow individual agents to have session managers. Sequential workflow gives us full control.
 
@@ -60,12 +63,12 @@ Implement a **dual-memory architecture** using Amazon Bedrock AgentCore Memory:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Pipeline Run (run_123)                    │
+│         Pipeline Run (Resource: awscc_s3_bucket)             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
 │  Discovery Agent          Documentation Agent                │
 │  session: discovery_123   session: documentation_123         │
-│  actor: tango_pipeline    actor: tango_pipeline             │
+│  actor: awscc_s3_bucket   actor: awscc_s3_bucket            │
 │         │                          │                          │
 │         └──────────┬───────────────┘                          │
 │                    │                                          │
@@ -73,6 +76,8 @@ Implement a **dual-memory architecture** using Amazon Bedrock AgentCore Memory:
 │            │ Shared Memory  │                                │
 │            │ /facts/{actor} │                                │
 │            │ /prefs/{actor} │                                │
+│            │ actor=awscc_   │                                │
+│            │   s3_bucket    │                                │
 │            └────────────────┘                                │
 │                                                               │
 └─────────────────────────────────────────────────────────────┘

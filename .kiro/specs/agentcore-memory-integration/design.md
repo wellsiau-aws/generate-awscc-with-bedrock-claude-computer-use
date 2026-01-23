@@ -9,7 +9,7 @@ The memory integration uses a **dual-memory architecture**:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    TANGO Pipeline Run                        │
+│         TANGO Pipeline Run (awscc_s3_bucket)                 │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
@@ -21,7 +21,8 @@ The memory integration uses a **dual-memory architecture**:
 │                            │                                 │
 │                    ┌───────▼────────┐                        │
 │                    │ Shared Memory  │                        │
-│                    │ Actor: tango   │                        │
+│                    │ Actor: awscc_  │                        │
+│                    │   s3_bucket    │                        │
 │                    │ Namespaces:    │                        │
 │                    │ /facts/{actor} │                        │
 │                    │ /prefs/{actor} │                        │
@@ -75,10 +76,17 @@ class MemoryConfig:
     
     # Common configuration
     aws_region: str
-    actor_id: str = "tango_pipeline"
+    actor_id: Optional[str] = None  # Set dynamically per resource
     
     @classmethod
-    def from_env(cls) -> 'MemoryConfig':
+    def from_env(cls, actor_id: Optional[str] = None) -> 'MemoryConfig':
+        """
+        Load configuration from environment variables.
+        
+        Args:
+            actor_id: Resource name (e.g., 'awscc_s3_bucket'). 
+                     If None, must be set before creating agents.
+        """
         """Load configuration from environment variables"""
         return cls(
             shared_memory_id=os.environ.get(
@@ -109,7 +117,8 @@ class MemoryConfig:
                 "TANGO_STORAGE_MEMORY_ID",
                 "tango-storage-memory"
             ),
-            aws_region=os.environ.get("AWS_REGION", "us-west-2")
+            aws_region=os.environ.get("AWS_REGION", "us-west-2"),
+            actor_id=actor_id  # Set dynamically per resource
         )
 
 # Shared retrieval configuration for all agents
@@ -482,7 +491,7 @@ def run_pipeline_with_memory():
     pipeline_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.info(f"Starting pipeline run: {pipeline_run_id}")
     
-    # Load memory configuration
+    # Load memory configuration (without actor_id yet)
     try:
         memory_config = MemoryConfig.from_env()
         enable_memory = True
@@ -490,8 +499,23 @@ def run_pipeline_with_memory():
         logger.warning(f"Memory configuration failed: {e}. Running without memory.")
         enable_memory = False
     
-    # Create agent factory
+    # Execute discovery to get resource name
+    logger.info("Step 1: Discovery")
+    discovery_agent = create_discovery_agent(None)  # No memory for discovery
+    discovery_result = discovery_agent("Find next unprocessed resource")
+    resource_info = json.loads(str(discovery_result))
+    
+    if resource_info["resource_name"] == "NONE":
+        logger.info("No resources to process")
+        return
+    
+    # Set actor_id to the resource name
+    actor_id = resource_info["resource_name"]
+    logger.info(f"Processing resource: {actor_id}")
+    
+    # Create agent factory with resource-specific actor_id
     if enable_memory:
+        memory_config.actor_id = actor_id  # Set dynamically
         factory = AgentFactory(
             shared_memory_id=memory_config.shared_memory_id,
             agent_memory_ids={
@@ -502,7 +526,7 @@ def run_pipeline_with_memory():
                 'cleanup': memory_config.cleanup_memory_id,
                 'storage': memory_config.storage_memory_id
             },
-            actor_id=memory_config.actor_id,
+            actor_id=actor_id,  # Resource-specific actor ID
             pipeline_run_id=pipeline_run_id,
             region=memory_config.aws_region,
             enable_memory=True
@@ -510,8 +534,7 @@ def run_pipeline_with_memory():
     else:
         factory = None
     
-    # Create agents (with or without memory)
-    discovery_agent = create_discovery_agent(factory)
+    # Create agents with memory (now that we have actor_id)
     documentation_agent = create_documentation_agent(factory)
     terraform_agent = create_terraform_agent(factory)
     validation_agent = create_validation_agent(factory)
@@ -520,16 +543,7 @@ def run_pipeline_with_memory():
     
     # Execute pipeline
     try:
-        # Step 1: Discovery
-        logger.info("Step 1: Discovery")
-        discovery_result = discovery_agent("Find next unprocessed resource")
-        resource_info = json.loads(str(discovery_result))
-        
-        if resource_info["resource_name"] == "NONE":
-            logger.info("No resources to process")
-            return
-        
-        # Step 2: Documentation
+        # Step 2: Documentation (with memory)
         logger.info("Step 2: Documentation")
         doc_input = json.dumps(resource_info)
         terraform_code = documentation_agent(doc_input)
@@ -597,27 +611,32 @@ def create_discovery_agent(factory):
 
 ```
 Discovery Agent
-    ↓ (writes)
-/pipeline/facts/tango_pipeline
+    ↓ (discovers: awscc_s3_bucket)
+    ↓ (writes to /pipeline/facts/awscc_s3_bucket)
+/pipeline/facts/awscc_s3_bucket
     ↓ (reads)
 Documentation Agent
-    ↓ (writes)
-/pipeline/facts/tango_pipeline
+    ↓ (writes code patterns to /pipeline/facts/awscc_s3_bucket)
+/pipeline/facts/awscc_s3_bucket
     ↓ (reads)
 Terraform Agent
 ```
 
+**Key Point**: Each resource type (awscc_s3_bucket, awscc_lambda_function, etc.) has its own isolated memory namespace.
+
 ### Agent Learning Flow
 
 ```
-Terraform Agent (Run 1)
+Terraform Agent (Run 1: awscc_s3_bucket)
     ↓ (learns from failure)
-/agent/validation_fixes/tango_pipeline
+/agent/validation_fixes/awscc_s3_bucket
     ↓ (retrieves on Run 2)
-Terraform Agent (Run 2)
+Terraform Agent (Run 2: awscc_s3_bucket)
     ↓ (applies learned fix)
 Success!
 ```
+
+**Key Point**: Agent learning is also scoped per resource type, so fixes for S3 buckets don't interfere with Lambda functions.
 
 ## Configuration
 
@@ -638,6 +657,8 @@ export TANGO_STORAGE_MEMORY_ID="mem-stu901"
 # AWS configuration
 export AWS_REGION="us-west-2"
 ```
+
+**Note**: Actor ID is set dynamically to the resource name (e.g., `awscc_s3_bucket`) during pipeline execution, not via environment variable.
 
 ## Error Handling
 
