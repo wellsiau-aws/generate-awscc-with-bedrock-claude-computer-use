@@ -682,6 +682,7 @@ class StorageManager:
             print(f"   [DRY-RUN]   status: success")
             print(f"   [DRY-RUN]   source: hashicorp_github")
             print(f"   [DRY-RUN]   s3_terraform_link: {s3_path}")
+            print(f"   [DRY-RUN]   pr_status: created")
             return True
         
         try:
@@ -693,7 +694,8 @@ class StorageManager:
                     'timestamp': {'N': str(timestamp)},
                     'status': {'S': 'success'},
                     'source': {'S': 'hashicorp_github'},
-                    's3_terraform_link': {'S': s3_path}
+                    's3_terraform_link': {'S': s3_path},
+                    'pr_status': {'S': 'created'}
                 }
             )
             print(f"   ✅ Created DynamoDB entry for {resource_name} ({filename})")
