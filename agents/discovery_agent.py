@@ -14,13 +14,14 @@ import config
 
 def get_processed_resources() -> Set[str]:
     """
-    Get list of successfully processed resources from DynamoDB.
+    Get list of processed resources from DynamoDB.
     
-    A resource is considered processed if it has at least one entry with status='success'.
-    This allows resources with only failed attempts to be retried.
+    A resource is considered processed if it has at least one entry with 
+    status='success' or status='failed'. This prevents infinite retries of 
+    failed resources while allowing new resources to be processed.
     
     Returns:
-        Set of resource names that have successful entries
+        Set of resource names that have been processed (success or failed)
     """
     try:
         dynamodb = boto3.client('dynamodb', region_name=config.AWS_REGION)
@@ -34,15 +35,15 @@ def get_processed_resources() -> Set[str]:
             }
         )
         
-        # Track resources with successful entries
+        # Track resources with successful or failed entries
         processed = set()
         
         for item in response.get('Items', []):
             resource_name = item.get('resource_name', {}).get('S')
             status = item.get('status', {}).get('S')
             
-            # Only consider resources with successful entries as "processed"
-            if resource_name and status == 'success':
+            # Consider resources with success or failed status as "processed"
+            if resource_name and status in ('success', 'failed'):
                 processed.add(resource_name)
         
         # Handle pagination if there are more items
@@ -60,7 +61,7 @@ def get_processed_resources() -> Set[str]:
                 resource_name = item.get('resource_name', {}).get('S')
                 status = item.get('status', {}).get('S')
                 
-                if resource_name and status == 'success':
+                if resource_name and status in ('success', 'failed'):
                     processed.add(resource_name)
         
         return processed
