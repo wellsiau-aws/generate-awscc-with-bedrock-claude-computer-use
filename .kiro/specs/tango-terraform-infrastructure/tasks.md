@@ -177,20 +177,20 @@ This implementation plan breaks down the creation of a Terraform module that aut
     - Include troubleshooting tips
     - _Requirements: 8.1_
 
-- [~] 10. Create placeholder generic template file
+- [ ] 10. Create placeholder generic template file
   - Create `templates/resources/` directory structure
   - Create `generic_resource.md.tmpl` placeholder file
   - Add comment explaining this should be replaced with actual template
   - _Requirements: 3.1_
 
-- [~] 11. Checkpoint - Validate Terraform configuration
+- [ ] 11. Checkpoint - Validate Terraform configuration
   - Run `terraform init` to initialize module
   - Run `terraform validate` to check syntax
   - Run `terraform fmt` to format code
   - Ensure all files are properly formatted
   - Ask user if questions arise
 
-- [~] 12. Manual testing validation
+- [ ] 12. Manual testing validation
   - Test `terraform plan` with default variables
   - Test `terraform plan` with custom variables
   - Verify plan shows all expected resources

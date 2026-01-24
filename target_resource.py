@@ -54,7 +54,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     resource_name = sys.argv[1]
-    provider_version = sys.argv[2] if len(sys.argv) > 2 else "1.53.0"
+    provider_version = sys.argv[2] if len(sys.argv) > 2 else "1.68.0"
     
     success = process_resource(resource_name, provider_version)
     sys.exit(0 if success else 1)

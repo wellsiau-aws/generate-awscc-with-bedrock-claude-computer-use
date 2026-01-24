@@ -9,8 +9,8 @@ from agents.orchestrator_agent import run_pipeline
 import config
 
 # Set environment variables from config
-os.environ['AWS_PROFILE'] = config.AWS_PROFILE
-os.environ['AWS_REGION'] = config.AWS_REGION
+#os.environ['AWS_PROFILE'] = config.AWS_PROFILE
+#os.environ['AWS_REGION'] = config.AWS_REGION
 os.environ['BYPASS_TOOL_CONSENT'] = 'true'
 
 def main():
