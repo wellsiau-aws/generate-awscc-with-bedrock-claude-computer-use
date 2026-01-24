@@ -5,6 +5,14 @@ Requires configuration via environment variables with mandatory validation.
 import os
 import sys
 
+# Load .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Loads from .env file in root directory
+except ImportError:
+    # python-dotenv not installed, skip loading .env file
+    pass
+
 # Required configuration from environment variables
 # These MUST be set before running the pipeline
 AWS_REGION = os.environ.get("AWS_REGION")
@@ -15,6 +23,18 @@ DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE")
 # Optional configuration with defaults
 DEFAULT_PROVIDER_VERSION = os.environ.get("DEFAULT_PROVIDER_VERSION", "1.68.0")
 TERRAFORM_WORK_DIR = os.environ.get("TERRAFORM_WORK_DIR", "terraform_test")
+
+# GitHub Configuration (for PR agent)
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
+GITHUB_FORK_URL = os.getenv('GITHUB_FORK_URL', '')
+GITHUB_UPSTREAM_URL = "https://github.com/hashicorp/terraform-provider-awscc"
+
+# Git Configuration (for PR agent)
+GIT_USER_NAME = os.getenv('GIT_USER_NAME', 'TANGO Pipeline')
+GIT_USER_EMAIL = os.getenv('GIT_USER_EMAIL', 'tango@example.com')
+
+# PR Configuration (for PR agent)
+PR_WORK_DIR = os.getenv('PR_WORK_DIR', 'pr_workspace')
 
 def validate_required_config():
     """
@@ -82,6 +102,29 @@ def validate_aws_resources():
             
     except ImportError:
         errors.append("boto3 not installed - cannot validate AWS resources")
+    
+    return errors
+
+def validate_pr_config():
+    """
+    Validate PR agent configuration.
+    
+    Returns:
+        List of missing/invalid configuration keys
+    """
+    errors = []
+    
+    if not GITHUB_TOKEN:
+        errors.append("GITHUB_TOKEN not found in .env file or environment")
+    
+    if not GITHUB_FORK_URL:
+        errors.append("GITHUB_FORK_URL environment variable required")
+    
+    if not GIT_USER_NAME:
+        errors.append("GIT_USER_NAME environment variable required")
+    
+    if not GIT_USER_EMAIL:
+        errors.append("GIT_USER_EMAIL environment variable required")
     
     return errors
 
