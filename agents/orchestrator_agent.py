@@ -4,6 +4,7 @@ Main entry point that coordinates specialized agents using Strands Agent pattern
 """
 
 import os
+import shutil
 import config
 from strands import Agent
 from .discovery_agent import discovery_agent
@@ -30,11 +31,28 @@ CRITICAL WORKING DIRECTORY RULE:
 ⚠️  If you see agents creating main.tf or other Terraform files in root, STOP and correct them
 ⚠️  All terraform commands must run from inside terraform_test directory
 
+WORKSPACE REUSE MODEL (IMPORTANT):
+The agents follow a Sequential Reuse pattern for efficiency:
+1. Documentation Agent: Creates and initializes terraform_test (SETUP OWNER)
+2. Terraform Agent: Reuses terraform_test, updates code only (CODE CORRECTOR)
+3. Validation Agent: Reuses terraform_test, verifies independently (VERIFIER)
+4. Orchestrator (YOU): Cleans up terraform_test at the end (CLEANUP OWNER)
+
+This saves ~60 seconds per resource by avoiding redundant terraform init operations!
+
 WORKFLOW:
 1. For finding unprocessed resources → Use the discovery_agent tool
 2. For generating Terraform code → Use the documentation_agent tool 
+   - Documentation agent creates terraform_test and initializes it
+   - Leaves terraform_test ready for next agent
 3. For terraform validation (init/validate/plan/apply/destroy) → Use the terraform_agent tool
+   - Terraform agent reuses existing terraform_test
+   - Updates code and validates
+   - Leaves terraform_test ready for next agent
 4. For independent validation review → Use the validation_agent tool
+   - Validation agent reuses existing terraform_test
+   - Verifies independently
+   - Leaves terraform_test for your cleanup
 5. For cleaning up Terraform code (removing provider blocks) → Use the terraform_cleanup_agent tool
 6. For storing results in DynamoDB and S3 → Use the storage_agent tool
 7. For cleaning up orphaned AWS resources → Use the cleanup_agent tool (when needed)
@@ -42,13 +60,22 @@ WORKFLOW:
 EXECUTION ORDER:
 1. Call discovery_agent to get the next resource to process AND provider version
 2. Call documentation_agent with BOTH resource name AND provider version from discovery
-   - Ensure documentation_agent creates terraform_test directory FIRST
+   - Documentation agent creates terraform_test directory and initializes it
    - Ensure all files are created INSIDE terraform_test
 3. Call terraform_agent to validate with real AWS deployment
+   - Terraform agent reuses terraform_test (no recreation!)
 4. Call validation_agent as independent reviewer of terraform agent's work
+   - Validation agent reuses terraform_test (no recreation!)
 5. Call terraform_cleanup_agent to clean up the Terraform code (remove provider blocks)
 6. Call storage_agent to store results (both success and failure cases)
-7. Report completion and instruct user to run again for next resource
+7. Clean up terraform_test directory (your responsibility as orchestrator)
+8. Report completion and instruct user to run again for next resource
+
+CLEANUP RESPONSIBILITY:
+- Agents do NOT clean up terraform_test between themselves
+- YOU (orchestrator) clean up terraform_test at the end
+- Clean up even on failure (use try/finally pattern)
+- This ensures agents can reuse the workspace efficiently
 
 CLEANUP: Use cleanup_agent only when explicitly requested or when terraform validation fails and leaves orphaned resources.
 
@@ -67,11 +94,12 @@ CRITICAL REQUIREMENTS:
 
 DATA FLOW:
 discovery_agent → {resource_name, provider_version}
-documentation_agent(resource_name + provider_version) → terraform_code
-terraform_agent(terraform_code + provider_version) → corrected_code
-validation_agent(corrected_code + resource_name) → validation_results
+documentation_agent(resource_name + provider_version) → terraform_code [creates terraform_test]
+terraform_agent(terraform_code + provider_version) → corrected_code [reuses terraform_test]
+validation_agent(corrected_code + resource_name) → validation_results [reuses terraform_test]
 terraform_cleanup_agent(corrected_code) → cleaned_code
 storage_agent(all_results + cleaned_code + validation_results) → storage_confirmation
+orchestrator → cleanup terraform_test
 
 IMPORTANT UPDATES:
 - The terraform_agent returns corrected code
@@ -79,12 +107,14 @@ IMPORTANT UPDATES:
 - The terraform_cleanup_agent removes provider blocks and terraform blocks
 - The storage_agent now receives cleaned code from terraform_cleanup_agent and validation results
 - This ensures that only working, validated, and cleaned code is stored in the examples
+- Agents reuse terraform_test workspace for efficiency (saves 60 seconds per resource!)
 
 FAILURE HANDLING:
 - If any agent fails (including validation_agent), still call storage_agent with failure details
 - Include which agent failed, error messages, and any partial results
 - If validation_agent fails, include validation failure details in storage
 - This maintains complete audit trail for learning and debugging
+- ALWAYS clean up terraform_test even on failure
 
 Execute the complete pipeline workflow using the specialized agents and handle both success and failure cases.
 """
@@ -109,18 +139,28 @@ def run_pipeline():
         
         result = orchestrator(pipeline_prompt)
         
+        return result
+        
+    except Exception as e:
+        print(f"\n❌ Pipeline error: {e}")
+        return None
+        
+    finally:
+        # ALWAYS clean up terraform_test, even on failure
+        import shutil
+        if os.path.exists(config.TERRAFORM_WORK_DIR):
+            print(f"\n🧹 Orchestrator cleaning up {config.TERRAFORM_WORK_DIR}...")
+            try:
+                shutil.rmtree(config.TERRAFORM_WORK_DIR)
+                print(f"✅ Cleaned up {config.TERRAFORM_WORK_DIR}")
+            except Exception as e:
+                print(f"⚠️  Failed to clean up {config.TERRAFORM_WORK_DIR}: {e}")
+        
         # Check workspace status after execution
         print_workspace_status()
         
         print("\n🎉 Multi-agent pipeline execution completed!")
-        return result
-    except Exception as e:
-        print(f"\n❌ Pipeline error: {e}")
-        
-        # Check workspace status on error
-        print_workspace_status()
-        
-        return None
+        print("🔄 Run again to process the next resource")
 
 if __name__ == "__main__":
     run_pipeline()

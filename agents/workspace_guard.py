@@ -1,6 +1,7 @@
 """
 Workspace Guard Utility
 Detects and warns about files created in wrong locations
+Validates workspace readiness for agent reuse
 """
 
 import os
@@ -109,6 +110,76 @@ def cleanup_root_violations():
             print(f"   ✅ Removed {file}")
         except Exception as e:
             print(f"   ❌ Failed to remove {file}: {e}")
+
+
+def is_workspace_valid(work_dir: str = None) -> bool:
+    """
+    Check if terraform workspace is valid and ready to use.
+    
+    A valid workspace has:
+    - Directory exists
+    - .terraform/ directory exists (providers downloaded)
+    - main.tf exists
+    - .terraform.lock.hcl exists (providers locked)
+    
+    Args:
+        work_dir: Path to workspace directory (defaults to config.TERRAFORM_WORK_DIR)
+    
+    Returns:
+        True if workspace is valid and ready to reuse, False otherwise
+    """
+    work_dir = work_dir or config.TERRAFORM_WORK_DIR
+    
+    # Check directory exists
+    if not os.path.exists(work_dir):
+        return False
+    
+    if not os.path.isdir(work_dir):
+        return False
+    
+    # Check .terraform directory exists (providers downloaded)
+    terraform_dir = os.path.join(work_dir, '.terraform')
+    if not os.path.exists(terraform_dir):
+        return False
+    
+    # Check main.tf exists
+    main_tf = os.path.join(work_dir, 'main.tf')
+    if not os.path.exists(main_tf):
+        return False
+    
+    # Check .terraform.lock.hcl exists (providers locked)
+    lock_file = os.path.join(work_dir, '.terraform.lock.hcl')
+    if not os.path.exists(lock_file):
+        return False
+    
+    return True
+
+
+def get_workspace_status() -> dict:
+    """
+    Get detailed workspace status information.
+    
+    Returns:
+        Dictionary with workspace status details
+    """
+    work_dir = config.TERRAFORM_WORK_DIR
+    
+    status = {
+        'exists': os.path.exists(work_dir),
+        'is_directory': os.path.isdir(work_dir) if os.path.exists(work_dir) else False,
+        'has_terraform_dir': False,
+        'has_main_tf': False,
+        'has_lock_file': False,
+        'is_valid': False
+    }
+    
+    if status['exists'] and status['is_directory']:
+        status['has_terraform_dir'] = os.path.exists(os.path.join(work_dir, '.terraform'))
+        status['has_main_tf'] = os.path.exists(os.path.join(work_dir, 'main.tf'))
+        status['has_lock_file'] = os.path.exists(os.path.join(work_dir, '.terraform.lock.hcl'))
+        status['is_valid'] = is_workspace_valid(work_dir)
+    
+    return status
 
 
 if __name__ == "__main__":

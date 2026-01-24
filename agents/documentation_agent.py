@@ -12,6 +12,9 @@ import config
 DOCUMENTATION_SYSTEM_PROMPT = """
 You are a specialized Terraform documentation generator for AWS CloudControl resources.
 
+YOUR ROLE: Setup Owner
+You are responsible for creating and initializing the Terraform workspace that other agents will reuse.
+
 YOUR TASK:
 Generate clean Terraform configuration code matching Terraform Registry example patterns.
 
@@ -20,15 +23,21 @@ CRITICAL WORKING DIRECTORY REQUIREMENTS:
 ⚠️  ALWAYS work inside: {config.TERRAFORM_WORK_DIR}
 ⚠️  ALL file operations MUST be inside {config.TERRAFORM_WORK_DIR}
 ⚠️  ALL terraform commands MUST be run from inside {config.TERRAFORM_WORK_DIR}
+⚠️  LEAVE {config.TERRAFORM_WORK_DIR} ready for next agent (DO NOT CLEAN UP)
 
 STEP-BY-STEP PROCESS (FOLLOW EXACTLY):
 1. Extract resource name and provider version from input data
 
-2. Create the working directory FIRST:
+2. Check if {config.TERRAFORM_WORK_DIR} already exists:
+   - If exists and valid (has .terraform/ and main.tf): REUSE IT
+   - If exists but invalid: Remove and create fresh
+   - If doesn't exist: Create fresh
+
+3. Create the working directory (if needed):
    - Create directory: {config.TERRAFORM_WORK_DIR}
    - Change into directory: cd {config.TERRAFORM_WORK_DIR}
    
-3. Create main.tf INSIDE {config.TERRAFORM_WORK_DIR}:
+4. Create main.tf INSIDE {config.TERRAFORM_WORK_DIR} (if needed):
    - Path must be: {config.TERRAFORM_WORK_DIR}/main.tf
    - Content:
 ```
@@ -48,20 +57,27 @@ terraform {{
 }}
 ```
 
-4. Run Terraform init FROM INSIDE {config.TERRAFORM_WORK_DIR}:
+5. Run Terraform init FROM INSIDE {config.TERRAFORM_WORK_DIR} (if needed):
+   - Only run if .terraform/ directory doesn't exist
    - Command: cd {config.TERRAFORM_WORK_DIR} && terraform init
    - OR: terraform -chdir={config.TERRAFORM_WORK_DIR} init
    
-5. Discover resource schema FROM INSIDE {config.TERRAFORM_WORK_DIR}:
+6. Discover resource schema FROM INSIDE {config.TERRAFORM_WORK_DIR}:
    - Command: cd {config.TERRAFORM_WORK_DIR} && terraform providers schema -json | jq '.provider_schemas."registry.terraform.io/hashicorp/awscc".resource_schemas.awscc_RESOURCE_NAME'
    - OR: terraform -chdir={config.TERRAFORM_WORK_DIR} providers schema -json | jq '...'
 
-6. Generate Terraform code:
+7. Generate Terraform code:
    - Use EXACT provider version provided (e.g., "1.48.0" becomes "~> 1.48.0")
    - Focus on the AWSCC resource - minimize supporting AWS provider resources
    - Use "example" naming throughout (example-stream, example-consumer)
    - Configure for {config.AWS_REGION} region when region-specific settings needed
    - Add Environment and Name tags when supported
+
+8. LEAVE WORKSPACE READY:
+   - DO NOT remove {config.TERRAFORM_WORK_DIR}
+   - DO NOT clean up .terraform/ directory
+   - Next agents will reuse this workspace
+   - Your job is to set it up, not tear it down
 
 COMMAND EXECUTION RULES:
 ✅ CORRECT: cd {config.TERRAFORM_WORK_DIR} && terraform init
@@ -73,6 +89,11 @@ FILE CREATION RULES:
 ✅ CORRECT: {config.TERRAFORM_WORK_DIR}/main.tf
 ❌ WRONG: main.tf (in root directory!)
 ❌ WRONG: ./main.tf (in root directory!)
+
+REUSE LOGIC:
+- If {config.TERRAFORM_WORK_DIR}/.terraform/ exists → Skip terraform init (already initialized)
+- If {config.TERRAFORM_WORK_DIR}/main.tf exists → Update it (don't recreate from scratch)
+- Reuse existing setup when possible for efficiency
 
 OUTPUT STYLE:
 - Keep minimal - essential arguments only for the AWSCC resource
@@ -115,13 +136,17 @@ def documentation_agent(resource_data: str) -> str:
         documentation_query = f"""
         Generate complete Terraform configuration using this resource information.
         
-        CRITICAL: Before doing ANYTHING else:
-        1. Create the directory: {config.TERRAFORM_WORK_DIR}
-        2. Change into that directory
-        3. Create main.tf INSIDE {config.TERRAFORM_WORK_DIR} (NOT in root!)
-        4. Run all terraform commands FROM INSIDE {config.TERRAFORM_WORK_DIR}
+        CRITICAL SETUP INSTRUCTIONS:
+        You are the SETUP OWNER - you create and initialize the workspace.
         
-        NEVER create main.tf in the root directory!
+        1. Check if {config.TERRAFORM_WORK_DIR} exists and is valid
+        2. If valid (has .terraform/ and main.tf): REUSE it, skip init
+        3. If invalid or missing: Create fresh and run terraform init
+        4. Generate the resource code
+        5. LEAVE {config.TERRAFORM_WORK_DIR} ready for next agent (DO NOT CLEAN UP)
+        
+        Next agents (terraform_agent and validation_agent) will REUSE your workspace.
+        DO NOT remove {config.TERRAFORM_WORK_DIR} - they need it!
         
         Resource information:
         {resource_data}

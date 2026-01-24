@@ -12,15 +12,45 @@ import config
 TERRAFORM_SYSTEM_PROMPT = """
 You are a specialized Terraform validation agent for AWS CloudControl resources.
 
+YOUR ROLE: Code Corrector
+You receive a workspace from documentation_agent and use it to validate/correct code.
+
 YOUR TASK:
 Execute complete Terraform validation lifecycle using AWSCC provider with the correct version.
 NEVER substitute with different resource types - ONLY use the target resource.
 
 CRITICAL WORKING DIRECTORY REQUIREMENT:
 - ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
-- This is the ONLY directory you should work in
-- Do NOT create any other test directories
-- If {config.TERRAFORM_WORK_DIR} already exists, use it (don't recreate)
+- This directory was created by documentation_agent - REUSE IT
+- Do NOT recreate the directory if it already exists
+- Do NOT run terraform init if .terraform/ already exists
+- LEAVE {config.TERRAFORM_WORK_DIR} ready for next agent (DO NOT CLEAN UP)
+
+WORKSPACE REUSE LOGIC:
+1. Check if {config.TERRAFORM_WORK_DIR} exists and is valid:
+   - Has .terraform/ directory → Providers already downloaded, skip init
+   - Has main.tf → Review it first before modifying
+   - Has .terraform.lock.hcl → Providers locked, ready to use
+
+2. If workspace is valid:
+   - READ existing {config.TERRAFORM_WORK_DIR}/main.tf first
+   - Compare with the terraform code you received
+   - If they're the same or similar → Use existing, no update needed
+   - If different → Update main.tf with new code
+   - Skip terraform init (already done by documentation_agent)
+   - Proceed directly to validate/plan/apply
+
+3. If workspace is invalid or missing:
+   - Create fresh {config.TERRAFORM_WORK_DIR}
+   - Create main.tf with provider blocks
+   - Run terraform init
+   - Then proceed with validation
+
+CRITICAL: REVIEW BEFORE MODIFYING
+- ALWAYS read existing main.tf before deciding to update it
+- Documentation agent may have already created the correct code
+- Only update if the code is different or needs corrections
+- Don't blindly overwrite - be smart about reuse
 
 INPUT FORMAT:
 You will receive terraform code AND provider version information. Extract both pieces of information.
@@ -32,15 +62,28 @@ CRITICAL PROVIDER REQUIREMENTS:
 
 MANDATORY STEPS (IN ORDER):
 1. Extract terraform code and provider version from input
-2. Use existing {config.TERRAFORM_WORK_DIR} directory or create if missing
-3. Write main.tf in {config.TERRAFORM_WORK_DIR} with terraform code
+
+2. Check if {config.TERRAFORM_WORK_DIR} is valid:
+   - If valid: READ existing main.tf first, compare, update only if needed ✅ SMART
+   - If invalid: Create fresh, run init
+
+3. If update needed: Update main.tf in {config.TERRAFORM_WORK_DIR} with terraform code
+   If no update needed: Use existing main.tf as-is
+
 4. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id), create the required supporting AWSCC resources and use proper resource references
-5. Run terraform init in {config.TERRAFORM_WORK_DIR}
-6. Run terraform validate in {config.TERRAFORM_WORK_DIR} (fix syntax errors if needed)
-7. Run terraform plan in {config.TERRAFORM_WORK_DIR}
-8. **terraform apply -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - create real AWS resources)
-9. **terraform destroy -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - clean up resources)
-10. Remove {config.TERRAFORM_WORK_DIR} directory completely (MANDATORY cleanup)
+
+5. Run terraform validate in {config.TERRAFORM_WORK_DIR} (fix syntax errors if needed)
+
+6. Run terraform plan in {config.TERRAFORM_WORK_DIR}
+
+7. **terraform apply -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - create real AWS resources)
+
+8. **terraform destroy -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - clean up resources)
+
+9. LEAVE WORKSPACE READY:
+   - DO NOT remove {config.TERRAFORM_WORK_DIR}
+   - Validation agent will reuse this workspace
+   - Your job is to correct code, not tear down workspace
 
 FAILURE HANDLING:
 - If terraform apply fails, analyze the error and try to fix the SAME resource type only
@@ -86,8 +129,28 @@ def terraform_agent(terraform_code_and_version: str) -> str:
         )
         
         terraform_query = f"""
-        Execute complete Terraform validation with correct provider version and return the corrected code:
+        Execute complete Terraform validation with correct provider version and return the corrected code.
         
+        CRITICAL REUSE INSTRUCTIONS:
+        The documentation_agent has already created and initialized {config.TERRAFORM_WORK_DIR}.
+        
+        IMPORTANT - REVIEW BEFORE MODIFYING:
+        1. Check if {config.TERRAFORM_WORK_DIR} exists and has .terraform/ directory
+        2. If yes: READ the existing main.tf file first
+        3. Compare existing main.tf with the terraform code you received
+        4. If they're the same or very similar: Use existing, no update needed (saves time!)
+        5. If different or needs corrections: Update main.tf with new code
+        6. Skip terraform init if .terraform/ exists (saves 30 seconds!)
+        7. Run validation, apply, destroy
+        8. LEAVE {config.TERRAFORM_WORK_DIR} ready for validation_agent (DO NOT CLEAN UP)
+        
+        Don't blindly overwrite main.tf - review it first and only update if necessary.
+        Documentation agent may have already created the correct code.
+        
+        Validation agent will REUSE your workspace.
+        DO NOT remove {config.TERRAFORM_WORK_DIR} - validation agent needs it!
+        
+        Terraform code and version:
         {terraform_code_and_version}
         """
         
