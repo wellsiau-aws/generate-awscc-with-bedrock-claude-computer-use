@@ -24,7 +24,7 @@ def check_resource_status(resource_name: str) -> str:
         {
             "resource_name": "awscc_connect_instance",
             "status": "success" | "failed" | "not_found",
-            "s3_terraform_link": "examples/resources/..." (if success),
+            "s3_terraform_links": ["examples/resources/..."] (if success, up to 3),
             "last_attempt": "2024-01-23T10:30:00" (if exists)
         }
     """
@@ -33,7 +33,7 @@ def check_resource_status(resource_name: str) -> str:
     try:
         dynamodb = boto3.client('dynamodb', region_name=config.AWS_REGION)
         
-        # Query for the resource (get most recent attempt)
+        # Query for the resource (get up to 3 most recent attempts)
         response = dynamodb.query(
             TableName=config.DYNAMODB_TABLE,
             KeyConditionExpression='resource_name = :rname',
@@ -41,7 +41,7 @@ def check_resource_status(resource_name: str) -> str:
                 ':rname': {'S': resource_name}
             },
             ScanIndexForward=False,  # Latest first
-            Limit=1
+            Limit=3  # Get up to 3 examples
         )
         
         # No records found
@@ -53,11 +53,13 @@ def check_resource_status(resource_name: str) -> str:
             print(f"   Status: not_found")
             return json.dumps(result)
         
-        # Parse the item
-        item = response['Items'][0]
-        status = item.get('status', {}).get('S', 'unknown')
-        timestamp = int(item.get('timestamp', {}).get('N', 0))
-        s3_link = item.get('s3_terraform_link', {}).get('S')
+        # Parse all items
+        items = response['Items']
+        
+        # Get status from most recent item
+        most_recent = items[0]
+        status = most_recent.get('status', {}).get('S', 'unknown')
+        timestamp = int(most_recent.get('timestamp', {}).get('N', 0))
         
         result = {
             "resource_name": resource_name,
@@ -65,13 +67,23 @@ def check_resource_status(resource_name: str) -> str:
             "last_attempt": datetime.fromtimestamp(timestamp).isoformat()
         }
         
-        # Include S3 link if successful
-        if status == "success" and s3_link:
-            result["s3_terraform_link"] = s3_link
+        # Include S3 links if successful
+        if status == "success":
+            s3_links = []
+            for item in items:
+                s3_link = item.get('s3_terraform_link', {}).get('S')
+                if s3_link:
+                    s3_links.append(s3_link)
+            
+            if s3_links:
+                result["s3_terraform_links"] = s3_links
+                result["example_count"] = len(s3_links)
         
         print(f"   Status: {status}")
-        if s3_link:
-            print(f"   S3 Link: {s3_link}")
+        if result.get("s3_terraform_links"):
+            print(f"   Found {len(result['s3_terraform_links'])} example(s)")
+            for link in result["s3_terraform_links"]:
+                print(f"     - {link}")
         
         return json.dumps(result)
         
@@ -85,20 +97,21 @@ def check_resource_status(resource_name: str) -> str:
 
 
 @tool
-def fetch_example_code(resource_name: str) -> str:
+def fetch_example_code(resource_name: str, example_index: int = 0) -> str:
     """
     Fetch example Terraform code for a successfully validated AWSCC resource.
     
     Args:
         resource_name: AWSCC resource name (e.g., "awscc_connect_instance")
+        example_index: Which example to fetch (0 = most recent, 1 = second, 2 = third). Default: 0
         
     Returns:
         Terraform code as string, or error message if not found.
     """
-    print(f"📥 Fetching example code for: {resource_name}")
+    print(f"📥 Fetching example code for: {resource_name} (index: {example_index})")
     
     try:
-        # First check status to get S3 link
+        # First check status to get S3 links
         status_json = check_resource_status(resource_name)
         status = json.loads(status_json)
         
@@ -108,12 +121,21 @@ def fetch_example_code(resource_name: str) -> str:
             print(f"   {message}")
             return message
         
-        # Get S3 link
-        s3_link = status.get('s3_terraform_link')
-        if not s3_link:
-            message = f"No S3 link found for {resource_name}"
+        # Get S3 links
+        s3_links = status.get('s3_terraform_links', [])
+        if not s3_links:
+            message = f"No S3 links found for {resource_name}"
             print(f"   {message}")
             return message
+        
+        # Validate example_index
+        if example_index < 0 or example_index >= len(s3_links):
+            message = f"Invalid example_index {example_index}. Available examples: 0-{len(s3_links)-1}"
+            print(f"   {message}")
+            return message
+        
+        # Get the requested S3 link
+        s3_link = s3_links[example_index]
         
         # Fetch from S3
         s3_client = boto3.client('s3', region_name=config.AWS_REGION)
@@ -124,6 +146,7 @@ def fetch_example_code(resource_name: str) -> str:
         
         code = response['Body'].read().decode('utf-8')
         print(f"   ✅ Fetched {len(code)} characters from S3")
+        print(f"   📄 File: {s3_link}")
         
         return code
         
