@@ -70,6 +70,10 @@ def terraform_agent(terraform_code_and_version: str) -> str:
     Returns:
         Corrected Terraform code after validation OR failure message
     """
+    print("\n" + "="*80)
+    print("🔧 TERRAFORM AGENT - STARTING")
+    print("="*80)
+    
     try:
         # Create system prompt with actual config values
         system_prompt = TERRAFORM_SYSTEM_PROMPT.replace(
@@ -88,6 +92,24 @@ def terraform_agent(terraform_code_and_version: str) -> str:
         """
         
         response = agent(terraform_query)
+        
+        # Check if it's a failure or success
+        if "TERRAFORM_LIFECYCLE_FAILED" in str(response):
+            print("\n" + "-"*80)
+            print("❌ TERRAFORM AGENT - FAILED")
+            print(f"   Terraform lifecycle validation failed")
+            print("="*80 + "\n")
+        else:
+            print("\n" + "-"*80)
+            print("✅ TERRAFORM AGENT - COMPLETED")
+            print(f"   Terraform code validated and corrected")
+            print("="*80 + "\n")
+        
         return str(response)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ TERRAFORM AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         return f"Error in terraform agent: {str(e)}"

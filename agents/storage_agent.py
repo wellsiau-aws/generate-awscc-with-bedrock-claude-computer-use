@@ -139,6 +139,10 @@ def storage_agent(storage_request: str) -> str:
     Returns:
         Storage confirmation with DynamoDB and S3 locations
     """
+    print("\n" + "="*80)
+    print("💾 STORAGE AGENT - STARTING")
+    print("="*80)
+    
     try:
         template_replacer = create_template_replacement_tool()
         
@@ -157,6 +161,17 @@ def storage_agent(storage_request: str) -> str:
         )
         
         response = agent(storage_request)
+        
+        print("\n" + "-"*80)
+        print("✅ STORAGE AGENT - COMPLETED")
+        print(f"   Stored results in DynamoDB and S3")
+        print("="*80 + "\n")
+        
         return str(response)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ STORAGE AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         return f"Error in storage agent: {str(e)}"

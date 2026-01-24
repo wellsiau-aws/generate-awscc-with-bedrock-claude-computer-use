@@ -51,6 +51,10 @@ def terraform_cleanup_agent(terraform_code: str) -> str:
     Returns:
         Cleaned Terraform code ready for examples
     """
+    print("\n" + "="*80)
+    print("🧹 TERRAFORM CLEANUP AGENT - STARTING")
+    print("="*80)
+    
     try:
         agent = Agent(
             system_prompt=CLEANUP_SYSTEM_PROMPT,
@@ -64,6 +68,17 @@ def terraform_cleanup_agent(terraform_code: str) -> str:
         """
         
         response = agent(cleanup_query)
+        
+        print("\n" + "-"*80)
+        print("✅ TERRAFORM CLEANUP AGENT - COMPLETED")
+        print(f"   Removed provider blocks and cleaned up code")
+        print("="*80 + "\n")
+        
         return str(response)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ TERRAFORM CLEANUP AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         return f"Error in terraform cleanup agent: {str(e)}"

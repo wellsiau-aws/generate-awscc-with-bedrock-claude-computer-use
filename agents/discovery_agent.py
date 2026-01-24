@@ -98,9 +98,25 @@ def discovery_agent(query: str) -> str:
     Returns:
         JSON string with resource name and provider version
     """
+    print("\n" + "="*80)
+    print("🔍 DISCOVERY AGENT - STARTING")
+    print("="*80)
+    
     try:
         result = find_unprocessed_resource()
+        
+        print("\n" + "-"*80)
+        print("✅ DISCOVERY AGENT - COMPLETED")
+        print(f"   Resource: {result.get('resource_name', 'N/A')}")
+        print(f"   Provider Version: {result.get('provider_version', 'N/A')}")
+        print("="*80 + "\n")
+        
         return json.dumps(result)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ DISCOVERY AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         error_result = {"resource_name": "ERROR", "provider_version": "ERROR", "error": str(e)}
         return json.dumps(error_result)

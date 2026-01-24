@@ -13,6 +13,7 @@ from .validation_agent import validation_agent
 from .terraform_cleanup_agent import terraform_cleanup_agent
 from .storage_agent import storage_agent
 from .cleanup_agent import cleanup_agent
+from .workspace_guard import print_workspace_status, cleanup_root_violations
 
 # Configuration
 os.environ['AWS_PROFILE'] = config.AWS_PROFILE
@@ -22,6 +23,12 @@ os.environ['BYPASS_TOOL_CONSENT'] = 'true'
 # Define the orchestrator system prompt with clear agent coordination guidance
 ORCHESTRATOR_SYSTEM_PROMPT = """
 You are the TANGO Pipeline Orchestrator that coordinates specialized agents to process AWS CloudControl resources:
+
+CRITICAL WORKING DIRECTORY RULE:
+⚠️  ALL agents MUST work inside the directory: terraform_test
+⚠️  NEVER allow agents to create files in the root directory
+⚠️  If you see agents creating main.tf or other Terraform files in root, STOP and correct them
+⚠️  All terraform commands must run from inside terraform_test directory
 
 WORKFLOW:
 1. For finding unprocessed resources → Use the discovery_agent tool
@@ -35,6 +42,8 @@ WORKFLOW:
 EXECUTION ORDER:
 1. Call discovery_agent to get the next resource to process AND provider version
 2. Call documentation_agent with BOTH resource name AND provider version from discovery
+   - Ensure documentation_agent creates terraform_test directory FIRST
+   - Ensure all files are created INSIDE terraform_test
 3. Call terraform_agent to validate with real AWS deployment
 4. Call validation_agent as independent reviewer of terraform agent's work
 5. Call terraform_cleanup_agent to clean up the Terraform code (remove provider blocks)
@@ -92,14 +101,25 @@ def run_pipeline():
     print("🚀 TANGO Multi-Agent Pipeline Starting")
     print("=" * 60)
     
+    # Clean up any files in root directory from previous failed runs
+    cleanup_root_violations()
+    
     try:
         pipeline_prompt = "Execute the complete pipeline workflow for the next AWS CloudControl resource."
         
         result = orchestrator(pipeline_prompt)
+        
+        # Check workspace status after execution
+        print_workspace_status()
+        
         print("\n🎉 Multi-agent pipeline execution completed!")
         return result
     except Exception as e:
         print(f"\n❌ Pipeline error: {e}")
+        
+        # Check workspace status on error
+        print_workspace_status()
+        
         return None
 
 if __name__ == "__main__":

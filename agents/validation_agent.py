@@ -121,6 +121,10 @@ def validation_agent(terraform_code_and_resource: str) -> str:
     Returns:
         JSON with validation results and S3 path
     """
+    print("\n" + "="*80)
+    print("✓ VALIDATION AGENT - STARTING")
+    print("="*80)
+    
     try:
         # Create system prompt with actual config values
         system_prompt = VALIDATION_SYSTEM_PROMPT.replace(
@@ -144,9 +148,35 @@ def validation_agent(terraform_code_and_resource: str) -> str:
         """
         
         response = agent(validation_query)
+        
+        # Try to parse response to check validation result
+        try:
+            result = json.loads(str(response))
+            if result.get("validation_result") == "success":
+                print("\n" + "-"*80)
+                print("✅ VALIDATION AGENT - COMPLETED (PASSED)")
+                print(f"   Resource: {result.get('resource_name', 'N/A')}")
+                print(f"   S3 Path: {result.get('s3_path', 'N/A')}")
+                print("="*80 + "\n")
+            else:
+                print("\n" + "-"*80)
+                print("❌ VALIDATION AGENT - COMPLETED (FAILED)")
+                print(f"   Resource: {result.get('resource_name', 'N/A')}")
+                print(f"   S3 Path: {result.get('s3_path', 'N/A')}")
+                print("="*80 + "\n")
+        except:
+            print("\n" + "-"*80)
+            print("✅ VALIDATION AGENT - COMPLETED")
+            print("="*80 + "\n")
+        
         return str(response)
         
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ VALIDATION AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         return json.dumps({
             "validation_result": "failed",
             "resource_name": "unknown",
