@@ -7,6 +7,7 @@ todo: add MCP support
 
 from strands import Agent, tool
 from strands_tools import python_repl, shell
+import config
 
 TERRAFORM_SYSTEM_PROMPT = """
 You are a specialized Terraform validation agent for AWS CloudControl resources.
@@ -14,6 +15,12 @@ You are a specialized Terraform validation agent for AWS CloudControl resources.
 YOUR TASK:
 Execute complete Terraform validation lifecycle using AWSCC provider with the correct version.
 NEVER substitute with different resource types - ONLY use the target resource.
+
+CRITICAL WORKING DIRECTORY REQUIREMENT:
+- ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
+- This is the ONLY directory you should work in
+- Do NOT create any other test directories
+- If {config.TERRAFORM_WORK_DIR} already exists, use it (don't recreate)
 
 INPUT FORMAT:
 You will receive terraform code AND provider version information. Extract both pieces of information.
@@ -25,14 +32,15 @@ CRITICAL PROVIDER REQUIREMENTS:
 
 MANDATORY STEPS (IN ORDER):
 1. Extract terraform code and provider version from input
-2. Create test directory and main.tf with terraform code
-3. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id), create the required supporting AWSCC resources and use proper resource references
-4. terraform init
-5. terraform validate (fix syntax errors if needed)
-6. terraform plan
-7. **terraform apply -auto-approve** (MANDATORY - create real AWS resources)
-8. **terraform destroy -auto-approve** (MANDATORY - clean up resources)
-9. Remove test directory completely (MANDATORY cleanup)
+2. Use existing {config.TERRAFORM_WORK_DIR} directory or create if missing
+3. Write main.tf in {config.TERRAFORM_WORK_DIR} with terraform code
+4. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id), create the required supporting AWSCC resources and use proper resource references
+5. Run terraform init in {config.TERRAFORM_WORK_DIR}
+6. Run terraform validate in {config.TERRAFORM_WORK_DIR} (fix syntax errors if needed)
+7. Run terraform plan in {config.TERRAFORM_WORK_DIR}
+8. **terraform apply -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - create real AWS resources)
+9. **terraform destroy -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - clean up resources)
+10. Remove {config.TERRAFORM_WORK_DIR} directory completely (MANDATORY cleanup)
 
 FAILURE HANDLING:
 - If terraform apply fails, analyze the error and try to fix the SAME resource type only
@@ -63,8 +71,13 @@ def terraform_agent(terraform_code_and_version: str) -> str:
         Corrected Terraform code after validation OR failure message
     """
     try:
+        # Create system prompt with actual config values
+        system_prompt = TERRAFORM_SYSTEM_PROMPT.replace(
+            "{config.TERRAFORM_WORK_DIR}", config.TERRAFORM_WORK_DIR
+        )
+        
         agent = Agent(
-            system_prompt=TERRAFORM_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             tools=[shell, python_repl]
         )
         

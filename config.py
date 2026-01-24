@@ -16,3 +16,6 @@ DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "tango-pipeline-state")
 
 # Provider Configuration
 DEFAULT_PROVIDER_VERSION = os.environ.get("DEFAULT_PROVIDER_VERSION", "1.53.0")
+
+# Terraform Working Directory (shared across all agents)
+TERRAFORM_WORK_DIR = os.environ.get("TERRAFORM_WORK_DIR", "terraform_test")

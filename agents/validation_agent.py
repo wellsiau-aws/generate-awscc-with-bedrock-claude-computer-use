@@ -16,6 +16,12 @@ YOUR ROLE:
 Act as an independent reviewer/judge of the terraform agent's output.
 NEVER MODIFY OR FIX CODE - test exactly as provided by terraform agent.
 
+CRITICAL WORKING DIRECTORY REQUIREMENT:
+- ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
+- This is the ONLY directory you should work in
+- Do NOT create any other test directories
+- If {config.TERRAFORM_WORK_DIR} already exists from previous agent, remove it first and create fresh
+
 YOUR TASK:
 1. Take the terraform code from terraform agent
 2. Run independent apply/destroy test to confirm it actually works
@@ -38,15 +44,16 @@ CRITICAL REQUIREMENTS:
 VALIDATION STEPS:
 1. Extract terraform code and resource name
 2. Verify code contains target resource (e.g., "awscc_s3_bucket")
-3. Create test directory and main.tf
-4. terraform init
-5. terraform validate
-6. terraform plan
-7. terraform apply -auto-approve (create real resources) - DO NOT MODIFY THE CODE, test it exactly as provided
-8. terraform destroy -auto-approve (clean up)
-9. Store detailed results in S3
-10. Clean up test directory completely
-11. Return validation status
+3. Remove {config.TERRAFORM_WORK_DIR} if it exists, then create fresh
+4. Create main.tf in {config.TERRAFORM_WORK_DIR}
+5. Run terraform init in {config.TERRAFORM_WORK_DIR}
+6. Run terraform validate in {config.TERRAFORM_WORK_DIR}
+7. Run terraform plan in {config.TERRAFORM_WORK_DIR}
+8. Run terraform apply -auto-approve in {config.TERRAFORM_WORK_DIR} (create real resources) - DO NOT MODIFY THE CODE, test it exactly as provided
+9. Run terraform destroy -auto-approve in {config.TERRAFORM_WORK_DIR} (clean up)
+10. Store detailed results in S3
+11. Clean up {config.TERRAFORM_WORK_DIR} directory completely
+12. Return validation status
 
 OUTPUT FORMAT:
 Use this exact format for all validation reports:
@@ -120,6 +127,8 @@ def validation_agent(terraform_code_and_resource: str) -> str:
             "{config.AWS_REGION}", config.AWS_REGION
         ).replace(
             "{config.S3_BUCKET}", config.S3_BUCKET
+        ).replace(
+            "{config.TERRAFORM_WORK_DIR}", config.TERRAFORM_WORK_DIR
         )
         
         agent = Agent(
