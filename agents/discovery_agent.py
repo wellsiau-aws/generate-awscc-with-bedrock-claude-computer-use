@@ -13,23 +13,60 @@ from typing import Dict, List, Set
 import config
 
 def get_processed_resources() -> Set[str]:
-    """Get list of processed resources from DynamoDB."""
+    """
+    Get list of successfully processed resources from DynamoDB.
+    
+    A resource is considered processed if it has at least one entry with status='success'.
+    This allows resources with only failed attempts to be retried.
+    
+    Returns:
+        Set of resource names that have successful entries
+    """
     try:
         dynamodb = boto3.client('dynamodb', region_name=config.AWS_REGION)
         
+        # Scan the table to get all items
         response = dynamodb.scan(
             TableName=config.DYNAMODB_TABLE,
-            ProjectionExpression='resource_name'
+            ProjectionExpression='resource_name, #status',
+            ExpressionAttributeNames={
+                '#status': 'status'
+            }
         )
         
+        # Track resources with successful entries
         processed = set()
+        
         for item in response.get('Items', []):
-            if 'resource_name' in item and 'S' in item['resource_name']:
-                processed.add(item['resource_name']['S'])
+            resource_name = item.get('resource_name', {}).get('S')
+            status = item.get('status', {}).get('S')
+            
+            # Only consider resources with successful entries as "processed"
+            if resource_name and status == 'success':
+                processed.add(resource_name)
+        
+        # Handle pagination if there are more items
+        while 'LastEvaluatedKey' in response:
+            response = dynamodb.scan(
+                TableName=config.DYNAMODB_TABLE,
+                ProjectionExpression='resource_name, #status',
+                ExpressionAttributeNames={
+                    '#status': 'status'
+                },
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            
+            for item in response.get('Items', []):
+                resource_name = item.get('resource_name', {}).get('S')
+                status = item.get('status', {}).get('S')
+                
+                if resource_name and status == 'success':
+                    processed.add(resource_name)
         
         return processed
+        
     except Exception as e:
-        print(f"Warning: Could not access DynamoDB: {e}")
+        print(f"⚠️  Warning: Could not access DynamoDB: {e}")
         return set()
 
 def get_github_releases() -> List[Dict]:

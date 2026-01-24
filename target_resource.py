@@ -16,6 +16,8 @@ os.environ['BYPASS_TOOL_CONSENT'] = 'true'
 def process_resource(resource_name, provider_version=None):
     """Process a specific resource through the full orchestration pipeline"""
     import shutil
+    import json
+    import boto3
     from agents.workspace_guard import print_workspace_status, cleanup_root_violations
     
     if provider_version is None:
@@ -25,6 +27,53 @@ def process_resource(resource_name, provider_version=None):
     print(f"Processing resource: {resource_name}")
     print(f"Using provider version: {provider_version}")
     print("=" * 60)
+    
+    # Preliminary check: See if resource already exists in DynamoDB/S3
+    print("\n🔍 Checking if resource already exists...")
+    try:
+        dynamodb = boto3.client('dynamodb', region_name=config.AWS_REGION)
+        
+        # Query for the resource (get most recent entries)
+        response = dynamodb.query(
+            TableName=config.DYNAMODB_TABLE,
+            KeyConditionExpression='resource_name = :rname',
+            ExpressionAttributeValues={
+                ':rname': {'S': resource_name}
+            },
+            ScanIndexForward=False,  # Latest first
+            Limit=3
+        )
+        
+        if response.get('Items'):
+            print(f"⚠️  Found {len(response['Items'])} existing entry(ies) for {resource_name}:")
+            for i, item in enumerate(response['Items'], 1):
+                status = item.get('status', {}).get('S', 'unknown')
+                source = item.get('source', {}).get('S', 'unknown')
+                s3_link = item.get('s3_terraform_link', {}).get('S', 'N/A')
+                timestamp = item.get('timestamp', {}).get('N', '0')
+                
+                from datetime import datetime
+                date_str = datetime.fromtimestamp(int(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+                
+                print(f"   {i}. Status: {status} | Source: {source} | Date: {date_str}")
+                print(f"      S3: {s3_link}")
+            
+            # Ask user if they want to continue
+            print(f"\n❓ Resource already exists. Continue anyway? (y/n): ", end='')
+            user_input = input().strip().lower()
+            
+            if user_input != 'y':
+                print("❌ Aborted by user")
+                return False
+            
+            print("✅ Continuing with processing...\n")
+        else:
+            print(f"✅ No existing entries found for {resource_name}")
+            print("✅ Proceeding with fresh processing...\n")
+    
+    except Exception as e:
+        print(f"⚠️  Could not check existing entries: {e}")
+        print("⚠️  Continuing anyway...\n")
     
     # Clean up any files in root directory from previous failed runs
     cleanup_root_violations()
