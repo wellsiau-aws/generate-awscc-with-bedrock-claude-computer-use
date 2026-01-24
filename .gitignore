@@ -63,3 +63,5 @@ TODO.md
 .venv
 .env
 repl_state/repl_state.pkl
+results*
+docs/*
