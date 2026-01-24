@@ -15,6 +15,9 @@ os.environ['BYPASS_TOOL_CONSENT'] = 'true'
 
 def process_resource(resource_name, provider_version=None):
     """Process a specific resource through the full orchestration pipeline"""
+    import shutil
+    from agents.workspace_guard import print_workspace_status, cleanup_root_violations
+    
     if provider_version is None:
         provider_version = config.DEFAULT_PROVIDER_VERSION
         
@@ -22,6 +25,9 @@ def process_resource(resource_name, provider_version=None):
     print(f"Processing resource: {resource_name}")
     print(f"Using provider version: {provider_version}")
     print("=" * 60)
+    
+    # Clean up any files in root directory from previous failed runs
+    cleanup_root_violations()
     
     processing_prompt = f"""
     Execute the complete pipeline workflow for the AWS CloudControl resource: {resource_name}
@@ -47,6 +53,18 @@ def process_resource(resource_name, provider_version=None):
     except Exception as e:
         print(f"\n❌ Resource processing error: {e}")
         return False
+    finally:
+        # ALWAYS clean up terraform_test, even on failure
+        if os.path.exists(config.TERRAFORM_WORK_DIR):
+            print(f"\n🧹 Cleaning up {config.TERRAFORM_WORK_DIR}...")
+            try:
+                shutil.rmtree(config.TERRAFORM_WORK_DIR)
+                print(f"✅ Cleaned up {config.TERRAFORM_WORK_DIR}")
+            except Exception as e:
+                print(f"⚠️  Failed to clean up {config.TERRAFORM_WORK_DIR}: {e}")
+        
+        # Check workspace status after execution
+        print_workspace_status()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -36,7 +36,7 @@ The agents follow a Sequential Reuse pattern for efficiency:
 1. Documentation Agent: Creates and initializes terraform_test (SETUP OWNER)
 2. Terraform Agent: Reuses terraform_test, updates code only (CODE CORRECTOR)
 3. Validation Agent: Reuses terraform_test, verifies independently (VERIFIER)
-4. Orchestrator (YOU): Cleans up terraform_test at the end (CLEANUP OWNER)
+4. Pipeline Wrapper: Cleans up terraform_test at the end (CLEANUP OWNER)
 
 This saves ~60 seconds per resource by avoiding redundant terraform init operations!
 
@@ -68,13 +68,13 @@ EXECUTION ORDER:
    - Validation agent reuses terraform_test (no recreation!)
 5. Call terraform_cleanup_agent to clean up the Terraform code (remove provider blocks)
 6. Call storage_agent to store results (both success and failure cases)
-7. Clean up terraform_test directory (your responsibility as orchestrator)
-8. Report completion and instruct user to run again for next resource
+7. Report completion and instruct user to run again for next resource
 
 CLEANUP RESPONSIBILITY:
 - Agents do NOT clean up terraform_test between themselves
-- YOU (orchestrator) clean up terraform_test at the end
-- Clean up even on failure (use try/finally pattern)
+- The pipeline wrapper function handles terraform_test cleanup automatically
+- Cleanup happens even on failure (via try/finally in wrapper)
+- Your job is to coordinate agents, not manage filesystem cleanup
 - This ensures agents can reuse the workspace efficiently
 
 CLEANUP: Use cleanup_agent only when explicitly requested or when terraform validation fails and leaves orphaned resources.
@@ -99,7 +99,7 @@ terraform_agent(terraform_code + provider_version) → corrected_code [reuses te
 validation_agent(corrected_code + resource_name) → validation_results [reuses terraform_test]
 terraform_cleanup_agent(corrected_code) → cleaned_code
 storage_agent(all_results + cleaned_code + validation_results) → storage_confirmation
-orchestrator → cleanup terraform_test
+pipeline_wrapper → cleanup terraform_test
 
 IMPORTANT UPDATES:
 - The terraform_agent returns corrected code
@@ -114,7 +114,7 @@ FAILURE HANDLING:
 - Include which agent failed, error messages, and any partial results
 - If validation_agent fails, include validation failure details in storage
 - This maintains complete audit trail for learning and debugging
-- ALWAYS clean up terraform_test even on failure
+- The pipeline wrapper will clean up terraform_test automatically (even on failure)
 
 Execute the complete pipeline workflow using the specialized agents and handle both success and failure cases.
 """
