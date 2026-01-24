@@ -57,8 +57,7 @@ terraform {{
 }}
 ```
 
-5. Run Terraform init FROM INSIDE {config.TERRAFORM_WORK_DIR} (if needed):
-   - Only run if .terraform/ directory doesn't exist
+5. Run Terraform init FROM INSIDE {config.TERRAFORM_WORK_DIR} (important before using any other terraform command):
    - Command: cd {config.TERRAFORM_WORK_DIR} && terraform init
    - OR: terraform -chdir={config.TERRAFORM_WORK_DIR} init
    

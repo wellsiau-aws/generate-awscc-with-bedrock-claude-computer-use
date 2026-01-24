@@ -13,7 +13,7 @@ S3_BUCKET = os.environ.get("S3_BUCKET")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE")
 
 # Optional configuration with defaults
-DEFAULT_PROVIDER_VERSION = os.environ.get("DEFAULT_PROVIDER_VERSION", "1.53.0")
+DEFAULT_PROVIDER_VERSION = os.environ.get("DEFAULT_PROVIDER_VERSION", "1.68.0")
 TERRAFORM_WORK_DIR = os.environ.get("TERRAFORM_WORK_DIR", "terraform_test")
 
 def validate_required_config():
