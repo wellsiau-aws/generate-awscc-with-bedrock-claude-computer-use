@@ -83,6 +83,7 @@ DYNAMODB SCHEMA ({config.DYNAMODB_TABLE} table):
 - resource_name (Partition Key): AWS CloudControl resource name
 - timestamp (Sort Key): Unix timestamp
 - status: "success" or "failed"
+- source: "tango_pipeline" (identifies entries created by the pipeline)
 - s3_terraform_link: S3 path to terraform file 
   * SUCCESS: examples/resources/{resource_name}/{service_name}.tf
   * FAILED: failed/resources/{resource_name}/{service_name}.tf
@@ -108,6 +109,7 @@ WORKFLOW:
    - resource_name (partition key)
    - timestamp (sort key)
    - status (success/failed)
+   - source (always set to "tango_pipeline")
    - s3_terraform_link
    - s3_template_link (ONLY for success, omit for failures)
    - s3_analysis_link (from validation agent)

@@ -313,8 +313,8 @@ class GitHubClient:
         """
         Fetch list of resource directories from examples/resources/.
         
-        This method discovers all available AWSCC resource examples by listing
-        the contents of the examples/resources/ directory in the GitHub repository.
+        This method uses the Git Trees API to discover all available AWSCC resource 
+        examples, which supports more than 1000 items (unlike the Contents API).
         
         Returns:
             List of resource directory names (e.g., ['awscc_s3_bucket', 'awscc_ec2_instance'])
@@ -326,28 +326,85 @@ class GitHubClient:
         print("🔍 DISCOVERING RESOURCES FROM GITHUB")
         print("="*80)
         
-        url = f"{self.BASE_URL}/repos/{self.REPO_OWNER}/{self.REPO_NAME}/contents/examples/resources"
+        # Step 1: Get the default branch (usually 'main' or 'master')
+        repo_url = f"{self.BASE_URL}/repos/{self.REPO_OWNER}/{self.REPO_NAME}"
         
-        def _fetch():
-            response = self.session.get(url)
+        def _fetch_repo():
+            response = self.session.get(repo_url)
             self._handle_rate_limit(response)
             response.raise_for_status()
             return response
         
         try:
-            response = self._retry_with_backoff(_fetch)
+            repo_response = self._retry_with_backoff(_fetch_repo)
+            default_branch = repo_response.json().get('default_branch', 'main')
             
-            # Parse response to extract directory names
-            contents = response.json()
+            # Step 2: Get the tree SHA for the default branch
+            branch_url = f"{self.BASE_URL}/repos/{self.REPO_OWNER}/{self.REPO_NAME}/git/trees/{default_branch}"
             
-            # Filter for directories only (exclude files)
+            def _fetch_branch():
+                response = self.session.get(branch_url)
+                self._handle_rate_limit(response)
+                response.raise_for_status()
+                return response
+            
+            branch_response = self._retry_with_backoff(_fetch_branch)
+            tree = branch_response.json().get('tree', [])
+            
+            # Find the 'examples' directory
+            examples_sha = None
+            for item in tree:
+                if item['path'] == 'examples' and item['type'] == 'tree':
+                    examples_sha = item['sha']
+                    break
+            
+            if not examples_sha:
+                raise Exception("Could not find 'examples' directory in repository")
+            
+            # Step 3: Get the tree for 'examples' directory
+            examples_url = f"{self.BASE_URL}/repos/{self.REPO_OWNER}/{self.REPO_NAME}/git/trees/{examples_sha}"
+            
+            def _fetch_examples():
+                response = self.session.get(examples_url)
+                self._handle_rate_limit(response)
+                response.raise_for_status()
+                return response
+            
+            examples_response = self._retry_with_backoff(_fetch_examples)
+            examples_tree = examples_response.json().get('tree', [])
+            
+            # Find the 'resources' directory
+            resources_sha = None
+            for item in examples_tree:
+                if item['path'] == 'resources' and item['type'] == 'tree':
+                    resources_sha = item['sha']
+                    break
+            
+            if not resources_sha:
+                raise Exception("Could not find 'examples/resources' directory in repository")
+            
+            # Step 4: Get the tree for 'examples/resources' directory with recursive flag
+            # This gets ALL subdirectories regardless of count
+            resources_url = f"{self.BASE_URL}/repos/{self.REPO_OWNER}/{self.REPO_NAME}/git/trees/{resources_sha}?recursive=0"
+            
+            def _fetch_resources():
+                response = self.session.get(resources_url)
+                self._handle_rate_limit(response)
+                response.raise_for_status()
+                return response
+            
+            resources_response = self._retry_with_backoff(_fetch_resources)
+            resources_tree = resources_response.json().get('tree', [])
+            
+            # Filter for directories only (type == 'tree')
             directories = [
-                item["name"] 
-                for item in contents 
-                if item["type"] == "dir"
+                item['path']
+                for item in resources_tree
+                if item['type'] == 'tree'
             ]
             
             print(f"✅ Discovered {len(directories)} resource directories")
+            
             return directories
             
         except requests.exceptions.RequestException as e:
@@ -737,6 +794,11 @@ class HydrationOrchestrator:
             # Process each file
             for filename in tf_files:
                 files_processed += 1
+                
+                # Skip import files (not useful as examples)
+                if filename in ['import-by-identity.tf', 'import-by-string-id.tf']:
+                    print(f"   ⏭️  Skipping import file: {filename}")
+                    continue
                 
                 try:
                     # Fetch file content from GitHub
