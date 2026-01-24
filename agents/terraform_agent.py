@@ -1,6 +1,8 @@
 """
 TANGO Multi-Agent Pipeline - Terraform Agent
 Specialized agent for executing Terraform lifecycle operations with real AWS deployment
+
+todo: add MCP support
 """
 
 from strands import Agent, tool

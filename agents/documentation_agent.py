@@ -1,6 +1,8 @@
 """
 TANGO Multi-Agent Pipeline - Documentation Agent
 Specialized agent for generating Terraform code for AWS CloudControl resources
+
+todo: add tool / connect with HashiCorp MCP
 """
 
 from strands import Agent, tool
