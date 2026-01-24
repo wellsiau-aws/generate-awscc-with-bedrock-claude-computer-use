@@ -8,6 +8,7 @@ todo: add MCP support
 from strands import Agent, tool
 from strands_tools import python_repl, shell
 import config
+from .resource_tools import check_resource_status, fetch_example_code, list_available_examples
 
 TERRAFORM_SYSTEM_PROMPT = """
 You are a specialized Terraform validation agent for AWS CloudControl resources.
@@ -18,6 +19,33 @@ You receive a workspace from documentation_agent and use it to validate/correct 
 YOUR TASK:
 Execute complete Terraform validation lifecycle using AWSCC provider with the correct version.
 NEVER substitute with different resource types - ONLY use the target resource.
+
+TOOLS AVAILABLE FOR SUPPLEMENTAL RESOURCES:
+1. check_resource_status(resource_name) - Check if an AWSCC resource has been validated
+2. fetch_example_code(resource_name) - Get working example code from S3
+3. list_available_examples(prefix) - Browse available AWSCC examples
+
+SUPPLEMENTAL RESOURCE STRATEGY:
+When you need to add dependency resources to fix validation errors:
+
+1. PREFER AWSCC RESOURCES:
+   - First, try to use AWSCC versions of supplemental resources
+   - Example: Use awscc_vpc instead of aws_vpc
+
+2. CHECK VALIDATION STATUS:
+   - Use check_resource_status() to see if the AWSCC version has been validated
+   - If status is "success": Use it confidently
+   - If status is "failed": Fall back to AWS provider version
+   - If status is "not_found": You can try AWSCC, but it's untested
+
+3. REUSE WORKING EXAMPLES:
+   - If check_resource_status() shows "success", use fetch_example_code() to get working code
+   - Integrate the fetched code as your supplemental resource
+   - Extract only the resource block you need
+
+4. DOCUMENT YOUR CHOICES:
+   - If using AWS provider for supplemental resources, add a comment explaining why
+   - Example: "# Using aws_vpc because awscc_vpc validation failed"
 
 CRITICAL WORKING DIRECTORY REQUIREMENT:
 - ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
@@ -70,7 +98,11 @@ MANDATORY STEPS (IN ORDER):
 3. If update needed: Update main.tf in {config.TERRAFORM_WORK_DIR} with terraform code
    If no update needed: Use existing main.tf as-is
 
-4. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id), create the required supporting AWSCC resources and use proper resource references
+4. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id):
+   - First check if AWSCC version exists using check_resource_status()
+   - If successful, fetch and use the AWSCC version
+   - If failed or not found, use AWS provider version with explanatory comment
+   - Create the required supporting resources and use proper resource references
 
 5. Run terraform validate in {config.TERRAFORM_WORK_DIR} (fix syntax errors if needed)
 
@@ -125,7 +157,7 @@ def terraform_agent(terraform_code_and_version: str) -> str:
         
         agent = Agent(
             system_prompt=system_prompt,
-            tools=[shell, python_repl]
+            tools=[shell, python_repl, check_resource_status, fetch_example_code, list_available_examples]
         )
         
         terraform_query = f"""
