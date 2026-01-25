@@ -65,3 +65,6 @@ def get_storage_logger():
 
 def get_cleanup_logger():
     return AgentLogger("CLEANUP AGENT", "🗑️")
+
+def get_pr_logger():
+    return AgentLogger("PR AGENT", "🔀")
