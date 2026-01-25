@@ -1,7 +1,6 @@
 # Local .terraform directories
 **/.terraform/*
 **/.terraform
-terraform_test*
 
 # .tfstate files
 *.tfstate
@@ -65,3 +64,5 @@ TODO.md
 repl_state/repl_state.pkl
 results*
 docs/*
+pr_workspace*
+terraform_test*

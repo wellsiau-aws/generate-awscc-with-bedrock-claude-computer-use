@@ -212,12 +212,14 @@ def run_hashicorp_validation(repo_path: str) -> str:
 ```
 
 **Logic**:
-- Run: `make fmt` (format code)
+- Set environment: `GOPROXY=direct`
+- Run: `make tools` (install required tools: tfplugindocs, goimports, etc.)
 - Run: `make docs` (auto-generate documentation from templates)
-- Run: `make validate` (if exists)
 - Verify: `docs/resources/{resource_name}.md` was created by `make docs`
 - Capture stdout/stderr
 - Return success/failure status
+
+**Note**: The terraform-provider-awscc repository uses `make tools` and `make docs`, not `make fmt`. The `make docs` command uses tfplugindocs to generate documentation from the template files.
 
 #### 3.6 GitHub PR Creator
 
@@ -249,7 +251,7 @@ This PR adds a validated Terraform example for `{resource_name}`.
 - ✅ Terraform code generated and validated
 - ✅ Real AWS deployment tested (apply/destroy lifecycle)
 - ✅ Independent validation review completed
-- ✅ Code formatted with `make fmt`
+- ✅ Required tools installed with `make tools`
 - ✅ Documentation generated with `make docs`
 
 ## Testing Evidence

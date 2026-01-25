@@ -91,9 +91,9 @@ This implementation creates a standalone PR agent that creates GitHub pull reque
 
 - [x] 6. HashiCorp Validation Tool
   - [x] 6.1 Implement run_hashicorp_validation tool
-    - Run 'make fmt' command
+    - Run 'make tools' command (install required tools)
     - Run 'make docs' command (auto-generates docs from templates)
-    - Run additional validation commands as needed
+    - Set GOPROXY=direct environment variable
     - Verify docs/resources/{resource_name}.md was created
     - Capture stdout and stderr
   - [x] 6.2 Add error handling
