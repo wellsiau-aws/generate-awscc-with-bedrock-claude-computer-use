@@ -682,47 +682,62 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             "commands": []
         }
         
-        # Run 'make fmt' command
-        print(f"\n📝 Running 'make fmt'...")
+        # Set environment variables for Go operations
+        env = os.environ.copy()
+        env['GOPROXY'] = 'direct'  # Use direct downloads instead of proxy
+        
+        print(f"\n🔧 Preparing Go environment...")
+        print(f"   Environment: GOPROXY=direct")
+        
+        # Run 'make tools' command to install required tools
+        print(f"\n🔧 Running 'make tools' (installing required tools)...")
         try:
-            fmt_result = subprocess.run(
-                ['make', 'fmt'],
+            tools_result = subprocess.run(
+                ['make', 'tools'],
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=600,  # 10 minute timeout for tool installation
+                env=env
             )
             
-            fmt_success = fmt_result.returncode == 0
+            tools_success = tools_result.returncode == 0
             
             results["commands"].append({
-                "command": "make fmt",
-                "returncode": fmt_result.returncode,
-                "success": fmt_success,
-                "stdout": fmt_result.stdout,
-                "stderr": fmt_result.stderr
+                "command": "make tools",
+                "returncode": tools_result.returncode,
+                "success": tools_success,
+                "stdout": tools_result.stdout,
+                "stderr": tools_result.stderr
             })
             
-            if fmt_success:
-                print(f"   ✓ make fmt completed successfully")
-                if fmt_result.stdout:
-                    print(f"   Output: {fmt_result.stdout[:200]}...")
+            if tools_success:
+                print(f"   ✓ make tools completed successfully")
+                if tools_result.stdout:
+                    # Show last few lines of output
+                    stdout_lines = tools_result.stdout.strip().split('\n')
+                    if len(stdout_lines) > 5:
+                        print(f"   Output (last 5 lines):")
+                        for line in stdout_lines[-5:]:
+                            print(f"      {line}")
+                    else:
+                        print(f"   Output: {tools_result.stdout[:200]}...")
             else:
-                print(f"   ❌ make fmt failed with return code {fmt_result.returncode}")
-                if fmt_result.stderr:
-                    print(f"   Error: {fmt_result.stderr[:500]}...")
+                print(f"   ❌ make tools failed with return code {tools_result.returncode}")
+                if tools_result.stderr:
+                    print(f"   Error: {tools_result.stderr[:500]}...")
                 raise subprocess.CalledProcessError(
-                    fmt_result.returncode,
-                    'make fmt',
-                    fmt_result.stdout,
-                    fmt_result.stderr
+                    tools_result.returncode,
+                    'make tools',
+                    tools_result.stdout,
+                    tools_result.stderr
                 )
         
         except subprocess.TimeoutExpired:
-            error_msg = "make fmt command timed out after 5 minutes"
+            error_msg = "make tools command timed out after 10 minutes"
             print(f"   ❌ {error_msg}")
             results["commands"].append({
-                "command": "make fmt",
+                "command": "make tools",
                 "success": False,
                 "error": error_msg
             })
@@ -731,14 +746,15 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             return json.dumps(results)
         
         # Run 'make docs' command (auto-generates docs from templates)
-        print(f"\n📚 Running 'make docs'...")
+        print(f"\n📚 Running 'make docs' (generating documentation)...")
         try:
             docs_result = subprocess.run(
                 ['make', 'docs'],
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=600,  # 10 minute timeout for docs generation
+                env=env
             )
             
             docs_success = docs_result.returncode == 0
@@ -754,7 +770,14 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             if docs_success:
                 print(f"   ✓ make docs completed successfully")
                 if docs_result.stdout:
-                    print(f"   Output: {docs_result.stdout[:200]}...")
+                    # Show last few lines of output
+                    stdout_lines = docs_result.stdout.strip().split('\n')
+                    if len(stdout_lines) > 5:
+                        print(f"   Output (last 5 lines):")
+                        for line in stdout_lines[-5:]:
+                            print(f"      {line}")
+                    else:
+                        print(f"   Output: {docs_result.stdout[:200]}...")
             else:
                 print(f"   ❌ make docs failed with return code {docs_result.returncode}")
                 if docs_result.stderr:
@@ -767,7 +790,7 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
                 )
         
         except subprocess.TimeoutExpired:
-            error_msg = "make docs command timed out after 5 minutes"
+            error_msg = "make docs command timed out after 10 minutes"
             print(f"   ❌ {error_msg}")
             results["commands"].append({
                 "command": "make docs",
@@ -1102,11 +1125,21 @@ def _generate_pr_description(resource_name: str, content: dict) -> str:
     validation_date = content.get('fetch_date', datetime.now().strftime("%Y-%m-%d"))
     s3_analysis_link = content.get('s3_analysis_link', '')
     
-    # Build S3 analysis URL if we have the link
-    analysis_url = ""
+    # Fetch analysis content from S3
+    analysis_content = ""
     if s3_analysis_link:
-        # Construct S3 URL
-        analysis_url = f"https://{config.S3_BUCKET}.s3.{config.AWS_REGION}.amazonaws.com/{s3_analysis_link}"
+        try:
+            print(f"   📥 Fetching analysis from S3: {s3_analysis_link}")
+            s3_client = boto3.client('s3', region_name=config.AWS_REGION)
+            response = s3_client.get_object(
+                Bucket=config.S3_BUCKET,
+                Key=s3_analysis_link
+            )
+            analysis_content = response['Body'].read().decode('utf-8')
+            print(f"   ✓ Analysis fetched ({len(analysis_content)} characters)")
+        except Exception as e:
+            print(f"   ⚠️  Could not fetch analysis from S3: {str(e)}")
+            analysis_content = ""
     
     # Generate PR description using template
     description = f"""## Description
@@ -1118,19 +1151,10 @@ This PR adds a validated Terraform example for `{resource_name}`.
 - ✅ Terraform code generated and validated
 - ✅ Real AWS deployment tested (apply/destroy lifecycle)
 - ✅ Independent validation review completed
-- ✅ Code formatted with `make fmt`
+- ✅ Required tools installed with `make tools`
 - ✅ Documentation generated with `make docs`
 
-## Testing Evidence
-
-"""
-    
-    if analysis_url:
-        description += f"Full validation analysis available at: {analysis_url}\n\n"
-    else:
-        description += "Validation analysis stored in S3.\n\n"
-    
-    description += f"""## Resource Details
+## Resource Details
 
 - **Resource**: `{resource_name}`
 - **Provider Version**: `{provider_version}`
@@ -1143,7 +1167,24 @@ This PR adds a validated Terraform example for `{resource_name}`.
 - `templates/resources/{resource_name}.md.tmpl`
 - `docs/resources/{resource_name}.md` (auto-generated by `make docs`)
 
----
+"""
+    
+    # Add detailed validation report if available
+    if analysis_content:
+        description += f"""## Validation Report
+
+<details>
+<summary>Click to expand full validation report</summary>
+
+```
+{analysis_content}
+```
+
+</details>
+
+"""
+    
+    description += """---
 
 *This PR was automatically generated by the TANGO Multi-Agent Pipeline.*
 """
@@ -1429,21 +1470,31 @@ def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) ->
             # Get the origin remote
             origin = repo.remote('origin')
             
-            # Configure push URL with token if available
+            # Configure push URL with token for authentication
             if config.GITHUB_TOKEN and 'github.com' in config.GITHUB_FORK_URL:
                 # Update remote URL to include token for authentication
                 fork_url = config.GITHUB_FORK_URL
                 if fork_url.startswith('https://github.com/'):
+                    # Use token in URL for authentication
                     push_url = fork_url.replace(
                         'https://github.com/',
                         f'https://{config.GITHUB_TOKEN}@github.com/'
                     )
-                    origin.set_url(push_url)
-                    print(f"   ✓ Configured authentication")
+                    # Set push URL (keeps fetch URL unchanged)
+                    origin.set_url(push_url, push=True)
+                    print(f"   ✓ Configured authentication with GitHub token")
+                else:
+                    print(f"   ⚠️  Fork URL doesn't start with https://github.com/")
+            else:
+                if not config.GITHUB_TOKEN:
+                    print(f"   ⚠️  GITHUB_TOKEN not found - push may fail")
+                else:
+                    print(f"   ⚠️  Fork URL doesn't contain github.com")
             
-            # Push the branch
+            # Push the branch with explicit refspec
             print(f"   Pushing...")
-            push_info = origin.push(branch_name)
+            refspec = f'{branch_name}:{branch_name}'
+            push_info = origin.push(refspec)
             
             # Check push result
             if push_info:
@@ -1478,9 +1529,30 @@ def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) ->
             # Handle specific git push errors
             error_str = str(e)
             
-            # Check for authentication failures
-            if 'authentication failed' in error_str.lower() or 'could not read' in error_str.lower():
-                raise ValueError(f"Authentication failed. Check GITHUB_TOKEN and permissions.")
+            print(f"\n❌ Git push error:")
+            print(f"   Error: {error_str}")
+            
+            # Check for authentication failures (403, 401)
+            if '403' in error_str or '401' in error_str or 'authentication failed' in error_str.lower():
+                print(f"\n🔍 Authentication troubleshooting:")
+                print(f"   GITHUB_TOKEN present: {bool(config.GITHUB_TOKEN)}")
+                if config.GITHUB_TOKEN:
+                    print(f"   Token length: {len(config.GITHUB_TOKEN)} characters")
+                    print(f"   Token prefix: {config.GITHUB_TOKEN[:10]}...")
+                print(f"   Fork URL: {config.GITHUB_FORK_URL}")
+                
+                # Check remote URL
+                try:
+                    remote_urls = list(origin.urls)
+                    print(f"   Remote URLs: {remote_urls}")
+                except:
+                    pass
+                
+                raise ValueError(
+                    f"Authentication failed (403/401). "
+                    f"Check that GITHUB_TOKEN is valid and has 'repo' scope. "
+                    f"Token present: {bool(config.GITHUB_TOKEN)}"
+                )
             
             # Check for network errors
             if 'could not resolve host' in error_str.lower() or 'failed to connect' in error_str.lower():
