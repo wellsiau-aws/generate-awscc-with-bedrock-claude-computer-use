@@ -41,7 +41,7 @@ def fetch_resource_content(resource_name: str) -> str:
         
         # Construct S3 paths
         terraform_key = f"examples/resources/{resource_name}/{service_name}.tf"
-        template_key = f"templates/resources/{resource_name}.md.tmpl"
+        template_key = f"templates/resources/{service_name}.md.tmpl"
         
         # Find the latest analysis file
         analysis_prefix = f"analysis/resource/{resource_name}/"
