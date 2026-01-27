@@ -104,7 +104,7 @@ WORKFLOW:
    - Use the template_replacer tool to create the resource-specific template
    - Reads generic template from S3: s3://{config.S3_BUCKET}/templates/resources/generic_resource.md.tmpl
    - Pass the resource_name, service_name, a brief description, and a descriptive heading
-   - Store template to S3 at templates/resources/{resource_name}.md.tmpl
+   - Store template to S3 at templates/resources/{service_name}.md.tmpl
 7. Create simplified DynamoDB entry with:
    - resource_name (partition key)
    - timestamp (sort key)
