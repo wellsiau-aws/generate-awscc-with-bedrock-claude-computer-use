@@ -6,7 +6,7 @@ Main entry point that coordinates specialized agents using Strands Agent pattern
 import os
 import shutil
 import config
-from strands import Agent
+from strands import Agent, tool
 from .discovery_agent import discovery_agent
 from .documentation_agent import documentation_agent
 from .terraform_agent import terraform_agent
@@ -15,11 +15,67 @@ from .terraform_cleanup_agent import terraform_cleanup_agent
 from .storage_agent import storage_agent
 from .cleanup_agent import cleanup_agent
 from .workspace_guard import print_workspace_status, cleanup_root_violations
+from .models import (
+    DiscoveryResult,
+    DocumentationResult,
+    TerraformResult,
+    ValidationResult,
+    StorageRequest,
+    StorageResult,
+    get_model_schema_description
+)
 
 # Configuration
 os.environ['AWS_PROFILE'] = config.AWS_PROFILE
 os.environ['AWS_REGION'] = config.AWS_REGION
 os.environ['BYPASS_TOOL_CONSENT'] = 'true'
+
+# Create schema inspection tool for the orchestrator
+@tool
+def get_data_model_schema(model_name: str) -> str:
+    """
+    Get the JSON schema description for a TANGO pipeline data model.
+    
+    Use this tool to understand the exact structure of data models used by agents.
+    This is especially useful when constructing JSON to pass to agents like storage_agent.
+    
+    Args:
+        model_name: Name of the model class. Valid options:
+                   - "DiscoveryResult" (from discovery_agent)
+                   - "DocumentationResult" (from documentation_agent)
+                   - "TerraformResult" (from terraform_agent)
+                   - "ValidationResult" (from validation_agent)
+                   - "StorageRequest" (input to storage_agent)
+                   - "StorageResult" (output from storage_agent)
+    
+    Returns:
+        Human-readable schema description with field names, types, and descriptions.
+    
+    Example:
+        To understand what structure storage_agent expects:
+        >>> schema = get_data_model_schema("StorageRequest")
+        >>> print(schema)
+        StorageRequest:
+          - resource_name: string - AWS CloudControl resource name
+          - status: string - Overall pipeline status
+          - validation_result: ValidationResult - Complete validation results (nested model)
+          ...
+    """
+    model_map = {
+        "DiscoveryResult": DiscoveryResult,
+        "DocumentationResult": DocumentationResult,
+        "TerraformResult": TerraformResult,
+        "ValidationResult": ValidationResult,
+        "StorageRequest": StorageRequest,
+        "StorageResult": StorageResult,
+    }
+    
+    if model_name not in model_map:
+        available = ", ".join(model_map.keys())
+        return f"Error: Unknown model '{model_name}'. Available models: {available}"
+    
+    model_class = model_map[model_name]
+    return get_model_schema_description(model_class)
 
 # Define the orchestrator system prompt with clear agent coordination guidance
 ORCHESTRATOR_SYSTEM_PROMPT = """
@@ -56,6 +112,7 @@ WORKFLOW:
 5. For cleaning up Terraform code (removing provider blocks) → Use the terraform_cleanup_agent tool
 6. For storing results in DynamoDB and S3 → Use the storage_agent tool
 7. For cleaning up orphaned AWS resources → Use the cleanup_agent tool (when needed)
+8. To inspect data model structure for each agent, use the get_data_model_schema
 
 EXECUTION ORDER:
 1. Call discovery_agent to get the next resource to process AND provider version
@@ -92,6 +149,13 @@ CRITICAL REQUIREMENTS:
 - For failures: pass error details, failed agent name, and partial results to storage_agent
 - For success: pass cleaned terraform code, execution results, validation results, and timing to storage_agent
 
+DATA MODEL INSPECTION:
+When you need to understand the exact structure of data models (especially for constructing JSON to pass to agents):
+- Use the get_data_model_schema tool to inspect model structures
+- Example: get_data_model_schema("StorageRequest") shows you exactly what storage_agent expects
+- Example: get_data_model_schema("ValidationResult") shows you what validation_agent returns
+- This is CRITICAL for passing task to the next agent
+
 DATA FLOW:
 discovery_agent → {resource_name, provider_version}
 documentation_agent(resource_name + provider_version) → terraform_code [creates terraform_test]
@@ -122,7 +186,16 @@ Execute the complete pipeline workflow using the specialized agents and handle b
 # Create the orchestrator agent with specialized agents as tools
 orchestrator = Agent(
     system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-    tools=[discovery_agent, documentation_agent, terraform_agent, validation_agent, terraform_cleanup_agent, storage_agent, cleanup_agent],
+    tools=[
+        discovery_agent,
+        documentation_agent,
+        terraform_agent,
+        validation_agent,
+        terraform_cleanup_agent,
+        storage_agent,
+        cleanup_agent,
+        get_data_model_schema  # Schema inspection tool
+    ],
     name="TANGO Pipeline Orchestrator"
 )
 
