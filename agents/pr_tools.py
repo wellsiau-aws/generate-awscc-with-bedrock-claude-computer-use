@@ -681,6 +681,12 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             "resource_name": resource_name,
             "commands": []
         }
+
+        # Extract service_name from resource_name (remove "awscc_" prefix)
+        if resource_name.startswith('awscc_'):
+            service_name = resource_name[6:]  # Remove "awscc_" prefix
+        else:
+            service_name = resource_name
         
         # Set environment variables for Go operations
         env = os.environ.copy()
