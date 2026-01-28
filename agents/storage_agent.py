@@ -115,7 +115,9 @@ WORKFLOW:
    - s3_analysis_link (from validation agent)
 8. Return structured summary
 
-CRITICAL: DO NOT create templates for failed executions. Templates are only for successful examples that can be used in pull requests.
+CRITICAL: 
+- DO NOT create templates for failed executions. Templates are only for successful examples that can be used in pull requests.
+- DO NOT delete dynamodb entry, you can create one.
 
 TEMPLATE REPLACEMENT EXAMPLES:
 - For awscc_s3_bucket: description="Create an S3 bucket with versioning and encryption", heading="Create an S3 bucket"
