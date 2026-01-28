@@ -96,7 +96,7 @@ WORKFLOW:
 1. Extract service name from resource_name (remove "awscc_" prefix)
 2. Extract validation results and S3 analysis link from input
 3. Determine if execution was SUCCESS or FAILED
-4. Clean up old entries: Query DynamoDB for existing entries with same resource_name and delete them
+4. Clean up old entries: Query DynamoDB for existing entries with same resource_name AND source=tango_pipeline, if found, delete them
 5. Store .tf file directly to S3:
    - SUCCESS: examples/resources/{resource_name}/{service_name}.tf
    - FAILED: failed/resources/{resource_name}/{service_name}.tf
@@ -117,7 +117,7 @@ WORKFLOW:
 
 CRITICAL: 
 - DO NOT create templates for failed executions. Templates are only for successful examples that can be used in pull requests.
-- DO NOT delete dynamodb entry, you can create one.
+- DO NOT delete entries with source=hashicorp_github, these are original examples created by contributors
 
 TEMPLATE REPLACEMENT EXAMPLES:
 - For awscc_s3_bucket: description="Create an S3 bucket with versioning and encryption", heading="Create an S3 bucket"
