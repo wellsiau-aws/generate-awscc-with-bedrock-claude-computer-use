@@ -204,6 +204,31 @@ def validation_agent(terraform_result: TerraformResult) -> str:
     print("="*80)
     
     try:
+        # Handle both dict and object inputs (Strands may serialize to dict)
+        if isinstance(terraform_result, dict):
+            corrected_code = terraform_result.get('corrected_code')
+            resource_name = terraform_result.get('resource_name')
+            provider_version = terraform_result.get('provider_version')
+            status = terraform_result.get('status')
+            workspace_reused = terraform_result.get('workspace_reused', False)
+            apply_succeeded = terraform_result.get('apply_succeeded', False)
+            fixes_applied = terraform_result.get('fixes_applied', [])
+            supplemental_resources_added = terraform_result.get('supplemental_resources_added', [])
+        else:
+            corrected_code = terraform_result.corrected_code
+            resource_name = terraform_result.resource_name
+            provider_version = terraform_result.provider_version
+            status = terraform_result.status
+            workspace_reused = terraform_result.workspace_reused
+            apply_succeeded = terraform_result.apply_succeeded
+            fixes_applied = terraform_result.fixes_applied
+            supplemental_resources_added = terraform_result.supplemental_resources_added
+        
+        print(f"📋 Resource: {resource_name}")
+        print(f"📦 Provider Version: {provider_version}")
+        print(f"📁 Corrected Code: {corrected_code}")
+        print(f"✅ Terraform Status: {status}")
+        
         agent = Agent(
             system_prompt=VALIDATION_SYSTEM_PROMPT,
             tools=[shell, python_repl, use_aws],
@@ -233,14 +258,14 @@ def validation_agent(terraform_result: TerraformResult) -> str:
         You are independent in JUDGMENT (verify it works), not in ENVIRONMENT (reuse for efficiency).
         
         Terraform result information from terraform_agent:
-        - Corrected Code Path: {terraform_result.corrected_code}
-        - Resource Name: {terraform_result.resource_name}
-        - Provider Version: {terraform_result.provider_version}
-        - Terraform Agent Status: {terraform_result.status}
-        - Workspace Reused: {terraform_result.workspace_reused}
-        - Apply Succeeded: {terraform_result.apply_succeeded}
-        - Fixes Applied: {terraform_result.fixes_applied}
-        - Supplemental Resources: {terraform_result.supplemental_resources_added}
+        - Corrected Code Path: {corrected_code}
+        - Resource Name: {resource_name}
+        - Provider Version: {provider_version}
+        - Terraform Agent Status: {status}
+        - Workspace Reused: {workspace_reused}
+        - Apply Succeeded: {apply_succeeded}
+        - Fixes Applied: {fixes_applied}
+        - Supplemental Resources: {supplemental_resources_added}
         
         Return a ValidationResult JSON object with all required fields.
         """

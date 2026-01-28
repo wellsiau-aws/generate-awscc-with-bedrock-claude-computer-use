@@ -91,14 +91,34 @@ def terraform_cleanup_agent(validation_result: ValidationResult) -> str:
     print("\n" + "="*80)
     print("🧹 TERRAFORM CLEANUP AGENT - STARTING")
     print("="*80)
-    print(f"   Resource: {validation_result.resource_name}")
-    print(f"   Provider Version: {validation_result.provider_version}")
-    print(f"   Validation Result: {validation_result.validation_result}")
-    print(f"   Target Resource Confirmed: {validation_result.target_resource_confirmed}")
-    print(f"   Workspace Reused: {validation_result.workspace_reused}")
+    
+    # Handle both dict and object inputs (Strands may serialize to dict)
+    if isinstance(validation_result, dict):
+        resource_name = validation_result.get('resource_name')
+        provider_version = validation_result.get('provider_version')
+        validation_result_status = validation_result.get('validation_result')
+        target_resource_confirmed = validation_result.get('target_resource_confirmed', False)
+        workspace_reused = validation_result.get('workspace_reused', False)
+        is_success = validation_result.get('is_success', False)
+    else:
+        resource_name = validation_result.resource_name
+        provider_version = validation_result.provider_version
+        validation_result_status = validation_result.validation_result
+        target_resource_confirmed = validation_result.target_resource_confirmed
+        workspace_reused = validation_result.workspace_reused
+        is_success = validation_result.is_success
+    
+    print(f"   Resource: {resource_name}")
+    print(f"   Provider Version: {provider_version}")
+    print(f"   Validation Result: {validation_result_status}")
+    print(f"   Target Resource Confirmed: {target_resource_confirmed}")
+    print(f"   Workspace Reused: {workspace_reused}")
        
     # Check if validation failed
-    validation_failed = not validation_result.is_success
+    validation_failed = not is_success
+    
+    # Get terraform code path
+    terraform_code_path = f"{config.TERRAFORM_WORK_DIR}/main.tf"
     
     try:
         # If validation failed, skip cleanup and return original code
@@ -111,7 +131,7 @@ def terraform_cleanup_agent(validation_result: ValidationResult) -> str:
             # Create CleanupResult for skipped cleanup
             result = CleanupResult(
                 cleaned_code="n/a",
-                resource_name=validation_result.resource_name,
+                resource_name=resource_name,
                 cleanup_applied=False,
                 cleanup_operations=[],
                 original_code_path=terraform_code_path,
@@ -128,13 +148,13 @@ def terraform_cleanup_agent(validation_result: ValidationResult) -> str:
         )
         
         cleanup_query = f"""
-        Clean up this Terraform code for resource {validation_result.resource_name} (provider version {validation_result.provider_version}).
+        Clean up this Terraform code for resource {resource_name} (provider version {provider_version}).
         
         Terraform Code path: {config.TERRAFORM_WORK_DIR}
                 
         Return a CleanupResult JSON object with:
         - cleaned_code: "the terraform code path
-        - resource_name: "{validation_result.resource_name}"
+        - resource_name: "{resource_name}"
         - cleanup_applied: true
         - cleanup_operations: list of operations performed (e.g., ["Removed provider blocks", "Removed random resources"])
         - original_code_path: null (or backup path if you create one)

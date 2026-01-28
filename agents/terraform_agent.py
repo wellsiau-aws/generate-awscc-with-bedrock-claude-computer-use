@@ -197,6 +197,26 @@ def terraform_agent(documentation_result: DocumentationResult) -> str:
     print("="*80)
     
     try:
+        # Handle both dict and object inputs (Strands may serialize to dict)
+        if isinstance(documentation_result, dict):
+            terraform_code = documentation_result.get('terraform_code')
+            resource_name = documentation_result.get('resource_name')
+            provider_version = documentation_result.get('provider_version')
+            workspace_initialized = documentation_result.get('workspace_initialized', False)
+            supplemental_resources = documentation_result.get('supplemental_resources', [])
+            supplemental_strategy = documentation_result.get('supplemental_strategy', '')
+        else:
+            terraform_code = documentation_result.terraform_code
+            resource_name = documentation_result.resource_name
+            provider_version = documentation_result.provider_version
+            workspace_initialized = documentation_result.workspace_initialized
+            supplemental_resources = documentation_result.supplemental_resources
+            supplemental_strategy = documentation_result.supplemental_strategy
+        
+        print(f"📋 Resource: {resource_name}")
+        print(f"📦 Provider Version: {provider_version}")
+        print(f"📁 Terraform Code: {terraform_code}")
+        
         agent = Agent(
             system_prompt=TERRAFORM_SYSTEM_PROMPT,
             tools=[shell, python_repl, check_resource_status, fetch_example_code, list_available_examples],
@@ -226,12 +246,12 @@ def terraform_agent(documentation_result: DocumentationResult) -> str:
         DO NOT remove {config.TERRAFORM_WORK_DIR} - validation agent needs it!
         
         Documentation result information:
-        - Terraform Code Path: {documentation_result.terraform_code}
-        - Resource Name: {documentation_result.resource_name}
-        - Provider Version: {documentation_result.provider_version}
-        - Workspace Initialized: {documentation_result.workspace_initialized}
-        - Supplemental Resources: {documentation_result.supplemental_resources}
-        - Supplemental Strategy: {documentation_result.supplemental_strategy}
+        - Terraform Code Path: {terraform_code}
+        - Resource Name: {resource_name}
+        - Provider Version: {provider_version}
+        - Workspace Initialized: {workspace_initialized}
+        - Supplemental Resources: {supplemental_resources}
+        - Supplemental Strategy: {supplemental_strategy}
         
         Return a TerraformResult JSON object with all required fields.
         """

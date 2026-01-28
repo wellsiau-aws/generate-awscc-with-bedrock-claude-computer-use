@@ -138,7 +138,7 @@ This implementation adds Pydantic structured output to all TANGO agents, replaci
     - Add integration test
     - _Requirements: Storage agent structured output with dynamic schema_
   
-  - [ ] 6.6 Update terraform_cleanup_agent
+  - [x] 6.6 Update terraform_cleanup_agent
     - Import CleanupResult and get_model_schema_description from agents.models
     - Generate schema dynamically: `CLEANUP_RESULT_SCHEMA = get_model_schema_description(CleanupResult)`
     - Inject schema into system prompt using f-string

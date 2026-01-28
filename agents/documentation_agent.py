@@ -196,6 +196,17 @@ def documentation_agent(discovery_result: DiscoveryResult) -> str:
     print("="*80)
     
     try:
+        # Handle both dict and object inputs (Strands may serialize to dict)
+        if isinstance(discovery_result, dict):
+            resource_name = discovery_result.get('resource_name')
+            provider_version = discovery_result.get('provider_version')
+        else:
+            resource_name = discovery_result.resource_name
+            provider_version = discovery_result.provider_version
+        
+        print(f"📋 Resource: {resource_name}")
+        print(f"📦 Provider Version: {provider_version}")
+        
         # Create system prompt with actual config values
         system_prompt = DOCUMENTATION_SYSTEM_PROMPT.replace(
             "{config.AWS_REGION}", config.AWS_REGION
@@ -225,8 +236,8 @@ def documentation_agent(discovery_result: DiscoveryResult) -> str:
         DO NOT remove {config.TERRAFORM_WORK_DIR} - they need it!
         
         Resource information:
-        - Resource Name: {discovery_result.resource_name}
-        - Provider Version: {discovery_result.provider_version}
+        - Resource Name: {resource_name}
+        - Provider Version: {provider_version}
         
         Return a DocumentationResult JSON object with all required fields.
         """
