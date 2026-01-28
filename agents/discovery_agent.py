@@ -8,9 +8,10 @@ import os
 import re
 import boto3
 import requests
-from strands import tool
+from strands import Agent, tool
 from typing import Dict, List, Set
 import config
+from .models import DiscoveryResult
 
 def get_processed_resources() -> Set[str]:
     """
@@ -130,31 +131,57 @@ def discovery_agent(query: str) -> str:
     """
     Find the next unprocessed AWS CloudControl resource using direct API calls.
     
+    This agent uses the Strands structured output feature to return a validated
+    DiscoveryResult model, ensuring type-safe data exchange with the orchestrator.
+    
     Args:
         query: Request to find next resource to process
         
     Returns:
-        JSON string with resource name and provider version
+        JSON string containing DiscoveryResult model with validated fields
     """
     print("\n" + "="*80)
     print("🔍 DISCOVERY AGENT - STARTING")
     print("="*80)
     
     try:
-        result = find_unprocessed_resource()
+        # Find unprocessed resource using direct API calls
+        result_dict = find_unprocessed_resource()
+        
+        # Create DiscoveryResult model with validation
+        # This will automatically validate the resource_name and provider_version patterns
+        discovery_result = DiscoveryResult(
+            resource_name=result_dict.get("resource_name", "ERROR"),
+            provider_version=result_dict.get("provider_version", "0.0.0"),
+            error=result_dict.get("error")
+        )
+        
+        # Use is_valid property for validation logic
+        if discovery_result.is_valid:
+            print(f"✅ Found valid resource: {discovery_result.resource_name}")
+        else:
+            print(f"⚠️  No valid resource found: {discovery_result.resource_name}")
         
         print("\n" + "-"*80)
         print("✅ DISCOVERY AGENT - COMPLETED")
-        print(f"   Resource: {result.get('resource_name', 'N/A')}")
-        print(f"   Provider Version: {result.get('provider_version', 'N/A')}")
+        print(f"   Resource: {discovery_result.resource_name}")
+        print(f"   Provider Version: {discovery_result.provider_version}")
+        print(f"   Valid: {discovery_result.is_valid}")
         print("="*80 + "\n")
         
-        return json.dumps(result)
+        # Return JSON for backward compatibility with orchestrator
+        return discovery_result.model_dump_json()
+        
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ DISCOVERY AGENT - FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
         
-        error_result = {"resource_name": "ERROR", "provider_version": "ERROR", "error": str(e)}
-        return json.dumps(error_result)
+        # Create error result with validated model
+        error_result = DiscoveryResult(
+            resource_name="ERROR",
+            provider_version="0.0.0",
+            error=str(e)
+        )
+        return error_result.model_dump_json()
