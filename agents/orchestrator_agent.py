@@ -47,6 +47,7 @@ def get_data_model_schema(model_name: str) -> str:
                    - "ValidationResult" (from validation_agent)
                    - "StorageRequest" (input to storage_agent)
                    - "StorageResult" (output from storage_agent)
+                   - "CleanupResult" (output from terraform_cleanup_agent)
     
     Returns:
         Human-readable schema description with field names, types, and descriptions.
@@ -116,19 +117,28 @@ WORKFLOW:
 
 EXECUTION ORDER:
 1. Call discovery_agent to get the next resource to process AND provider version
-2. Call documentation_agent with BOTH resource name AND provider version from discovery
+   - Discovery agent returns a DiscoveryResult object with validated fields
+2. Call documentation_agent with the DiscoveryResult object from discovery_agent
    - Documentation agent creates terraform_test directory and initializes it
+   - Documentation agent returns a DocumentationResult object with validated fields
    - Ensure all files are created INSIDE terraform_test
-3. Call terraform_agent to validate with real AWS deployment
+3. Call terraform_agent with the DocumentationResult object from documentation_agent
    - Terraform agent reuses terraform_test (no recreation!)
-4. Call validation_agent as independent reviewer of terraform agent's work
+   - Terraform agent returns a TerraformResult object with validated fields
+4. Call validation_agent with the TerraformResult object from terraform_agent
    - Validation agent reuses terraform_test (no recreation!)
-5. Call terraform_cleanup_agent to clean up the Terraform code (remove provider blocks)
-6. Call storage_agent to store results (both success and failure cases)
+   - Validation agent returns a ValidationResult object with validated fields
+5. Call terraform_cleanup_agent with the ValidationResult object from validation_agent
+   - Cleanup agent removes provider blocks and terraform blocks from successful code
+   - Cleanup agent skips cleanup if validation failed (preserves error context)
+   - Cleanup agent returns a CleanupResult object with cleaned code path
+6. Call storage_agent to store results with StorageRequest object
+   - Storage agent runs regardless if the previous steps are success and failure cases
+   - Storage agent retuns a StorageResult 
 7. Report completion and instruct user to run again for next resource
 
 CLEANUP RESPONSIBILITY:
-- Agents do NOT clean up terraform_test between themselves
+- Agents do NOT clean up terraform_test directory between themselves
 - The pipeline wrapper function handles terraform_test cleanup automatically
 - Cleanup happens even on failure (via try/finally in wrapper)
 - Your job is to coordinate agents, not manage filesystem cleanup
@@ -157,11 +167,11 @@ When you need to understand the exact structure of data models (especially for c
 - This is CRITICAL for passing task to the next agent
 
 DATA FLOW:
-discovery_agent → {resource_name, provider_version}
-documentation_agent(resource_name + provider_version) → terraform_code [creates terraform_test]
-terraform_agent(terraform_code + provider_version) → corrected_code [reuses terraform_test]
-validation_agent(corrected_code + resource_name) → validation_results [reuses terraform_test]
-terraform_cleanup_agent(corrected_code) → cleaned_code
+discovery_agent → DiscoveryResult object
+documentation_agent(DiscoveryResult) → DocumentationResult object [creates terraform_test]
+terraform_agent(DocumentationResult) → TerraformResult object [reuses terraform_test]
+validation_agent(TerraformResult) → ValidationResult object [reuses terraform_test]
+terraform_cleanup_agent(ValidationResult) → CleanupResult object
 storage_agent(all_results + cleaned_code + validation_results) → storage_confirmation
 pipeline_wrapper → cleanup terraform_test
 

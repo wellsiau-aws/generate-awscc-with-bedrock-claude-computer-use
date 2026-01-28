@@ -8,7 +8,7 @@ from strands_tools import python_repl, shell, use_aws
 from datetime import datetime
 import json
 import config
-from .models import ValidationResult, get_model_schema_description
+from .models import ValidationResult, TerraformResult, get_model_schema_description
 
 # Generate schema dynamically from the model
 VALIDATION_RESULT_SCHEMA = get_model_schema_description(ValidationResult)
@@ -185,7 +185,7 @@ Example:
 """
 
 @tool
-def validation_agent(terraform_code_and_resource: str) -> str:
+def validation_agent(terraform_result: TerraformResult) -> str:
     """
     Independent validation of terraform agent's work.
     
@@ -193,7 +193,8 @@ def validation_agent(terraform_code_and_resource: str) -> str:
     ValidationResult model, ensuring type-safe data exchange with the orchestrator.
     
     Args:
-        terraform_code_and_resource: Terraform code and resource name from terraform agent
+        terraform_result: TerraformResult object from terraform_agent containing
+                         validated corrected code path, resource name, and provider version
         
     Returns:
         JSON string containing ValidationResult model with validated fields
@@ -231,11 +232,20 @@ def validation_agent(terraform_code_and_resource: str) -> str:
         
         You are independent in JUDGMENT (verify it works), not in ENVIRONMENT (reuse for efficiency).
         
-        Input from terraform agent:
-        {terraform_code_and_resource}
+        Terraform result information from terraform_agent:
+        - Corrected Code Path: {terraform_result.corrected_code}
+        - Resource Name: {terraform_result.resource_name}
+        - Provider Version: {terraform_result.provider_version}
+        - Terraform Agent Status: {terraform_result.status}
+        - Workspace Reused: {terraform_result.workspace_reused}
+        - Apply Succeeded: {terraform_result.apply_succeeded}
+        - Fixes Applied: {terraform_result.fixes_applied}
+        - Supplemental Resources: {terraform_result.supplemental_resources_added}
         
         Return a ValidationResult JSON object with all required fields.
         """
+
+        print(validation_query)
         
         result = agent(validation_query)
         validation_data: ValidationResult = result.structured_output  # ← Type-safe access

@@ -9,7 +9,7 @@ from strands import Agent, tool
 from strands_tools import python_repl, shell
 import config
 from .resource_tools import check_resource_status, fetch_example_code, list_available_examples
-from .models import TerraformResult, TerraformLifecycleStep, get_model_schema_description
+from .models import TerraformResult, TerraformLifecycleStep, DocumentationResult, get_model_schema_description
 
 # Generate schema dynamically from the model
 TERRAFORM_RESULT_SCHEMA = get_model_schema_description(TerraformResult)
@@ -178,7 +178,7 @@ Example:
 """
 
 @tool
-def terraform_agent(terraform_code_and_version: str) -> str:
+def terraform_agent(documentation_result: DocumentationResult) -> str:
     """
     Execute complete Terraform validation lifecycle with real AWS deployment.
 
@@ -186,7 +186,8 @@ def terraform_agent(terraform_code_and_version: str) -> str:
     TerraformResult model, ensuring type-safe data exchange with the orchestrator.
 
     Args:
-        terraform_code_and_version: Terraform code and provider version info
+        documentation_result: DocumentationResult object from documentation_agent containing
+                            validated terraform code path, resource name, and provider version
 
     Returns:
         JSON string containing TerraformResult model with validated fields
@@ -224,11 +225,18 @@ def terraform_agent(terraform_code_and_version: str) -> str:
         Validation agent will REUSE your workspace.
         DO NOT remove {config.TERRAFORM_WORK_DIR} - validation agent needs it!
         
-        Terraform code and version:
-        {terraform_code_and_version}
+        Documentation result information:
+        - Terraform Code Path: {documentation_result.terraform_code}
+        - Resource Name: {documentation_result.resource_name}
+        - Provider Version: {documentation_result.provider_version}
+        - Workspace Initialized: {documentation_result.workspace_initialized}
+        - Supplemental Resources: {documentation_result.supplemental_resources}
+        - Supplemental Strategy: {documentation_result.supplemental_strategy}
         
         Return a TerraformResult JSON object with all required fields.
         """
+
+        print(terraform_query)
         
         result = agent(terraform_query)
         terraform_data: TerraformResult = result.structured_output  # ← Type-safe access

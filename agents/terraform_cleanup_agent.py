@@ -6,7 +6,7 @@ Specialized agent for cleaning up Terraform code
 from strands import Agent, tool
 from strands_tools import python_repl
 
-from agents.models import CleanupResult, get_model_schema_description
+from agents.models import CleanupResult, ValidationResult, get_model_schema_description
 
 # Generate schema dynamically to avoid duplication
 CLEANUP_RESULT_SCHEMA = get_model_schema_description(CleanupResult)
@@ -15,7 +15,7 @@ CLEANUP_SYSTEM_PROMPT = f"""
 You are a specialized Terraform code cleanup agent.
 
 CRITICAL: Check if the input indicates a FAILED execution first!
-- If you see "TERRAFORM_LIFECYCLE_FAILED" or similar failure indicators in the input
+- If you see "validation_result" or similar failure indicators in the input
 - Return the code AS-IS without any cleanup
 - Do NOT attempt to clean up failed code - it masks the actual errors
 
@@ -73,12 +73,7 @@ Return ONLY valid JSON matching the CleanupResult schema.
 """
 
 @tool
-def terraform_cleanup_agent(
-    terraform_code_path: str,
-    resource_name: str,
-    provider_version: str,
-    validation_failed: bool = False
-) -> str:
+def terraform_cleanup_agent(validation_result: ValidationResult) -> str:
     """
     Clean up Terraform code by removing provider blocks, terraform blocks, 
     excessive comments, and test-specific names.
@@ -86,10 +81,9 @@ def terraform_cleanup_agent(
     IMPORTANT: If validation failed, cleanup is skipped to preserve error context.
 
     Args:
-        terraform_code_path: Path to the main.tf file to clean
-        resource_name: AWS CloudControl resource name (e.g., "awscc_s3_bucket")
-        provider_version: AWSCC provider version (e.g., "1.53.0")
-        validation_failed: Whether validation failed (if True, skip cleanup)
+        validation_result: ValidationResult object from validation_agent containing
+                          validated terraform code path, resource name, provider version,
+                          and validation status
 
     Returns:
         JSON string containing CleanupResult with cleaned code path and metadata
@@ -97,10 +91,14 @@ def terraform_cleanup_agent(
     print("\n" + "="*80)
     print("🧹 TERRAFORM CLEANUP AGENT - STARTING")
     print("="*80)
-    print(f"   Resource: {resource_name}")
-    print(f"   Provider Version: {provider_version}")
-    print(f"   Code Path: {terraform_code_path}")
-    print(f"   Validation Failed: {validation_failed}")
+    print(f"   Resource: {validation_result.resource_name}")
+    print(f"   Provider Version: {validation_result.provider_version}")
+    print(f"   Validation Result: {validation_result.validation_result}")
+    print(f"   Target Resource Confirmed: {validation_result.target_resource_confirmed}")
+    print(f"   Workspace Reused: {validation_result.workspace_reused}")
+       
+    # Check if validation failed
+    validation_failed = not validation_result.is_success
     
     try:
         # If validation failed, skip cleanup and return original code
@@ -112,8 +110,8 @@ def terraform_cleanup_agent(
             
             # Create CleanupResult for skipped cleanup
             result = CleanupResult(
-                cleaned_code=terraform_code_path,
-                resource_name=resource_name,
+                cleaned_code="n/a",
+                resource_name=validation_result.resource_name,
                 cleanup_applied=False,
                 cleanup_operations=[],
                 original_code_path=terraform_code_path,
@@ -121,22 +119,7 @@ def terraform_cleanup_agent(
             )
             
             return result.model_dump_json()
-        
-        # Read the terraform code
-        try:
-            with open(terraform_code_path, 'r') as f:
-                terraform_code = f.read()
-        except Exception as e:
-            print(f"\n❌ Failed to read Terraform code: {str(e)}")
-            result = CleanupResult(
-                cleaned_code=terraform_code_path,
-                resource_name=resource_name,
-                cleanup_applied=False,
-                cleanup_operations=[],
-                error=f"Failed to read Terraform code: {str(e)}"
-            )
-            return result.model_dump_json()
-        
+                
         # Create agent with structured output
         agent = Agent(
             system_prompt=CLEANUP_SYSTEM_PROMPT,
@@ -145,20 +128,19 @@ def terraform_cleanup_agent(
         )
         
         cleanup_query = f"""
-        Clean up this Terraform code for resource {resource_name} (provider version {provider_version}).
+        Clean up this Terraform code for resource {validation_result.resource_name} (provider version {validation_result.provider_version}).
         
-        Code path: {terraform_code_path}
-        
-        Terraform code:
-        {terraform_code}
-        
+        Terraform Code path: {config.TERRAFORM_WORK_DIR}
+                
         Return a CleanupResult JSON object with:
-        - cleaned_code: "{terraform_code_path}" (same path, we'll overwrite it)
-        - resource_name: "{resource_name}"
+        - cleaned_code: "the terraform code path
+        - resource_name: "{validation_result.resource_name}"
         - cleanup_applied: true
         - cleanup_operations: list of operations performed (e.g., ["Removed provider blocks", "Removed random resources"])
         - original_code_path: null (or backup path if you create one)
         """
+        
+        print (cleanup_query)
         
         response = agent(cleanup_query)
         
@@ -192,7 +174,7 @@ def terraform_cleanup_agent(
             
             result = CleanupResult(
                 cleaned_code=terraform_code_path,
-                resource_name=resource_name,
+                resource_name=validation_result.resource_name,
                 cleanup_applied=False,
                 cleanup_operations=[],
                 error="Agent did not return structured output"
@@ -208,7 +190,7 @@ def terraform_cleanup_agent(
         # Return error result
         result = CleanupResult(
             cleaned_code=terraform_code_path,
-            resource_name=resource_name,
+            resource_name=validation_result.resource_name,
             cleanup_applied=False,
             cleanup_operations=[],
             error=f"Cleanup agent exception: {str(e)}"

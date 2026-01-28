@@ -14,6 +14,7 @@ Models:
     ValidationResult: Output from validation_agent
     StorageRequest: Input to storage_agent
     StorageResult: Output from storage_agent
+    CleanupResult: Output from terraform_cleanup_agent
 
 Usage:
     from agents.models import DiscoveryResult

@@ -16,57 +16,53 @@ from agents.models import StorageRequest, StorageResult, get_model_schema_descri
 STORAGE_REQUEST_SCHEMA = get_model_schema_description(StorageRequest)
 STORAGE_RESULT_SCHEMA = get_model_schema_description(StorageResult)
 
-def create_template_replacement_tool():
-    """Create a programmatic template replacement tool"""
-    @tool
-    def template_replacer(resource_name: str, service_name: str, description: str, heading: str) -> str:
-        """
-        Programmatically replace template variables in the generic template.
-        
-        Args:
-            resource_name: Full resource name (e.g., "awscc_b2bi_capability")
-            service_name: Service name without prefix (e.g., "b2bi_capability") 
-            description: Brief description for the resource
-            heading: Descriptive heading for the example
-            
-        Returns:
-            The processed template content
-        """
-        try:
-            s3_client = boto3.client('s3')
-            response = s3_client.get_object(
-                Bucket=config.S3_BUCKET,
-                Key='templates/resources/generic_resource.md.tmpl'
-            )
-            template_content = response['Body'].read().decode('utf-8')
-            
-            replacements = {
-                "Description about the first example": description,
-                "First example": heading,
-                "SERVICE_NAME": service_name
-            }
-            
-            processed_content = template_content
-            for old_text, new_text in replacements.items():
-                processed_content = processed_content.replace(old_text, new_text)
-            
-            if "{{ tffile" not in processed_content:
-                return "Error: Template processing failed - missing {{ tffile }} pattern"
-                
-            if "resource \"" in processed_content and "{{ tffile" in processed_content:
-                lines = processed_content.split('\n')
-                terraform_lines = [i for i, line in enumerate(lines) if "resource \"" in line]
-                tffile_lines = [i for i, line in enumerate(lines) if "{{ tffile" in line]
-                
-                if terraform_lines and tffile_lines:
-                    return "Error: Template contains both embedded Terraform code and {{ tffile }} - this is incorrect"
-            
-            return processed_content
-            
-        except Exception as e:
-            return f"Error in template replacement: {str(e)}"
+@tool
+def template_replacer(resource_name: str, service_name: str, description: str, heading: str) -> str:
+    """
+    Programmatically replace template variables in the generic template.
     
-    return template_replacer
+    Args:
+        resource_name: Full resource name (e.g., "awscc_b2bi_capability")
+        service_name: Service name without prefix (e.g., "b2bi_capability") 
+        description: Brief description for the resource
+        heading: Descriptive heading for the example
+        
+    Returns:
+        The processed template content
+    """
+    try:
+        s3_client = boto3.client('s3')
+        response = s3_client.get_object(
+            Bucket=config.S3_BUCKET,
+            Key='templates/resources/generic_resource.md.tmpl'
+        )
+        template_content = response['Body'].read().decode('utf-8')
+        
+        replacements = {
+            "Description about the first example": description,
+            "First example": heading,
+            "SERVICE_NAME": service_name
+        }
+        
+        processed_content = template_content
+        for old_text, new_text in replacements.items():
+            processed_content = processed_content.replace(old_text, new_text)
+        
+        if "{{ tffile" not in processed_content:
+            return "Error: Template processing failed - missing {{ tffile }} pattern"
+            
+        if "resource \"" in processed_content and "{{ tffile" in processed_content:
+            lines = processed_content.split('\n')
+            terraform_lines = [i for i, line in enumerate(lines) if "resource \"" in line]
+            tffile_lines = [i for i, line in enumerate(lines) if "{{ tffile" in line]
+            
+            if terraform_lines and tffile_lines:
+                return "Error: Template contains both embedded Terraform code and {{ tffile }} - this is incorrect"
+        
+        return processed_content
+        
+    except Exception as e:
+        return f"Error in template replacement: {str(e)}"
 
 STORAGE_SYSTEM_PROMPT = f"""
 You are a specialized storage agent for pipeline results and template generation.
@@ -182,13 +178,13 @@ def storage_agent(storage_request: str) -> str:
             print(f"   Warning: Failed to parse StorageRequest: {e}")
             print(f"   Continuing with raw JSON input...")
         
-        template_replacer = create_template_replacement_tool()
-        
         agent = Agent(
             system_prompt=STORAGE_SYSTEM_PROMPT,
             tools=[use_aws, python_repl, template_replacer],
             structured_output_model=StorageResult
         )
+
+        print(storage_request)
         
         response = agent(storage_request)
         

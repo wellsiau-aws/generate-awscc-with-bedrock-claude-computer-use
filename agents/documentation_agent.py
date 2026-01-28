@@ -9,7 +9,7 @@ from strands import Agent, tool
 from strands_tools import python_repl, use_llm, http_request
 import config
 from .resource_tools import check_resource_status, fetch_example_code, list_available_examples
-from .models import DocumentationResult, get_model_schema_description
+from .models import DocumentationResult, DiscoveryResult, get_model_schema_description
 
 # Generate schema dynamically from the model
 DOCUMENTATION_RESULT_SCHEMA = get_model_schema_description(DocumentationResult)
@@ -180,12 +180,13 @@ Example:
 """
 
 @tool
-def documentation_agent(resource_data: str) -> str:
+def documentation_agent(discovery_result: DiscoveryResult) -> str:
     """
     Generate Terraform configuration code for an AWS CloudControl resource.
 
     Args:
-        resource_data: JSON string or text containing resource name and provider version info
+        discovery_result: DiscoveryResult object from discovery_agent containing validated
+                         resource name and provider version
 
     Returns:
         JSON string containing DocumentationResult model
@@ -224,10 +225,13 @@ def documentation_agent(resource_data: str) -> str:
         DO NOT remove {config.TERRAFORM_WORK_DIR} - they need it!
         
         Resource information:
-        {resource_data}
+        - Resource Name: {discovery_result.resource_name}
+        - Provider Version: {discovery_result.provider_version}
         
         Return a DocumentationResult JSON object with all required fields.
         """
+        
+        print (documentation_query)
         
         result = agent(documentation_query)
         documentation_data: DocumentationResult = result.structured_output  # ← Type-safe access
