@@ -134,9 +134,23 @@ This implementation adds Pydantic structured output to all TANGO agents, replaci
     - Accept StorageRequest as input (parse from JSON)
     - Access via `result.structured_output`
     - Return `model_dump_json()` for backward compatibility
-    - Validate nested models (ValidationResult, TerraformResult)
+    - Validate nested models (ValidationResult, TerraformResult, CleanupResult)
     - Add integration test
     - _Requirements: Storage agent structured output with dynamic schema_
+  
+  - [ ] 6.6 Update terraform_cleanup_agent
+    - Import CleanupResult and get_model_schema_description from agents.models
+    - Generate schema dynamically: `CLEANUP_RESULT_SCHEMA = get_model_schema_description(CleanupResult)`
+    - Inject schema into system prompt using f-string
+    - Add `structured_output_model=CleanupResult` to Agent
+    - Access via `result.structured_output`
+    - Return `model_dump_json()` for backward compatibility
+    - Track cleanup operations performed
+    - Use `is_success` property for validation
+    - Handle failure detection (skip cleanup if validation failed)
+    - Set cleanup_applied=false and skipped_reason when skipping
+    - Add integration test
+    - _Requirements: Cleanup agent structured output with dynamic schema_
 
 - [ ] 7. Create agent integration tests
   - Create `tests/test_agent_integration.py`

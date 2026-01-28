@@ -53,6 +53,21 @@ Problems: No validation, runtime errors, no type safety
 │ (Pydantic)      │ → TerraformResult
 └─────────────────┘
 
+┌─────────────────┐
+│ Validation Agent│ ← TerraformResult
+│ (Pydantic)      │ → ValidationResult
+└─────────────────┘
+
+┌─────────────────┐
+│ Cleanup Agent   │ ← TerraformResult
+│ (Pydantic)      │ → CleanupResult
+└─────────────────┘
+
+┌─────────────────┐
+│ Storage Agent   │ ← StorageRequest (with CleanupResult)
+│ (Pydantic)      │ → StorageResult
+└─────────────────┘
+
 Benefits: Validation, type safety, clear contracts
 ```
 
@@ -142,7 +157,9 @@ TerraformResult (contains List[TerraformLifecycleStep])
     ↓
 ValidationResult
     ↓
-StorageRequest (contains ValidationResult, TerraformResult)
+CleanupResult
+    ↓
+StorageRequest (contains ValidationResult, TerraformResult, CleanupResult)
     ↓
 StorageResult
 ```
@@ -314,6 +331,46 @@ Return a ValidationResult with:
 - workspace_reused: Whether workspace was reused
 - validation_timestamp: When validation performed
 - error: Optional error message
+"""
+```
+
+#### Terraform Cleanup Agent
+
+**Changes:**
+- Add `structured_output_model=CleanupResult`
+- Parse input as `TerraformResult` (from orchestrator)
+- Return `CleanupResult.model_dump_json()`
+- Track cleanup operations performed
+- Handle failure detection (skip cleanup if validation failed)
+
+**System Prompt Updates:**
+```python
+CLEANUP_SYSTEM_PROMPT = """
+...existing prompt...
+
+OUTPUT FORMAT:
+Return a CleanupResult with:
+- cleaned_code: Path to cleaned Terraform code (or unchanged if skipped)
+- resource_name: Target resource name
+- cleanup_applied: Whether cleanup was performed
+- cleanup_operations: List of operations performed
+- original_code_path: Reference to original code
+- skipped_reason: Why cleanup was skipped (if applicable)
+- error: Optional error message
+
+Cleanup operations include:
+- Remove terraform blocks
+- Remove provider blocks (aws, awscc, random)
+- Remove random_* resources
+- Replace dynamic names with static names
+- Remove test-specific comments
+- Remove output blocks
+
+FAILURE DETECTION:
+- If input contains "TERRAFORM_LIFECYCLE_FAILED" or error indicators
+- Set cleanup_applied=false
+- Set skipped_reason="Failed validation detected"
+- Return code unchanged to preserve error context
 """
 ```
 
@@ -566,14 +623,24 @@ def run_pipeline():
         val_str = validation_agent(val_input)
         val_data = ValidationResult.model_validate_json(val_str)
         
-        # 5. Storage - Create StorageRequest, parse StorageResult
+        # 5. Cleanup - Parse to CleanupResult
+        cleanup_input = tf_data.model_dump_json()  # Pass terraform result
+        cleanup_str = terraform_cleanup_agent(cleanup_input)
+        cleanup_data = CleanupResult.model_validate_json(cleanup_str)
+        
+        if not cleanup_data.is_success:
+            print(f"Cleanup failed: {cleanup_data.error}")
+            # Continue to storage with cleanup failure
+        
+        # 6. Storage - Create StorageRequest, parse StorageResult
         storage_req = StorageRequest(
             resource_name=discovery_data.resource_name,
             status="success" if val_data.is_success else "failed",
-            terraform_code=tf_data.corrected_code,
+            terraform_code=cleanup_data.cleaned_code,  # Use cleaned code
             provider_version=discovery_data.provider_version,
             validation_result=val_data,
             terraform_result=tf_data,
+            cleanup_result=cleanup_data,  # Include cleanup results
             execution_time_seconds=None,  # Calculate if needed
             failed_agent=None
         )
@@ -724,8 +791,12 @@ See `requirements.md` for complete Pydantic model definitions with all fields, v
    Input: TerraformResult
    Output: ValidationResult(validation_result="success", target_resource_confirmed=True)
 
-5. Storage Agent
-   Input: StorageRequest(validation_result=..., terraform_result=...)
+5. Terraform Cleanup Agent
+   Input: TerraformResult
+   Output: CleanupResult(cleaned_code="...", cleanup_applied=True, cleanup_operations=["Removed provider blocks", "Removed random resources"])
+
+6. Storage Agent
+   Input: StorageRequest(validation_result=..., terraform_result=..., cleanup_result=...)
    Output: StorageResult(status="success", dynamodb_stored=True, s3_terraform_link="...")
 ```
 

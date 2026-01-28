@@ -95,22 +95,38 @@ Currently, agents communicate through unstructured strings and manual JSON parsi
 4.8. Model includes `is_success` and `all_steps_passed` properties
 4.9. Error field captures validation failures
 
-### 5. Storage Agent Input/Output
+### 5. Terraform Cleanup Agent Output
+
+**As a** storage agent  
+**I want** cleaned terraform code with provider blocks removed  
+**So that** I can store production-ready examples without test infrastructure
+
+**Acceptance Criteria:**
+5.1. Cleanup agent returns `CleanupResult` Pydantic model
+5.2. Cleaned code is separated from metadata
+5.3. Model tracks whether cleanup was applied or skipped
+5.4. Cleanup operations performed are documented
+5.5. Model includes `is_success` property for quick status check
+5.6. Skipped reason is captured when cleanup is bypassed (e.g., failed validation)
+5.7. Original code reference is maintained
+5.8. Error field captures cleanup failures
+
+### 6. Storage Agent Input/Output
 
 **As a** pipeline orchestrator  
 **I want** structured storage requests and confirmations  
 **So that** I can track what was stored and where
 
 **Acceptance Criteria:**
-5.1. Storage agent accepts `StorageRequest` Pydantic model
-5.2. Storage agent returns `StorageResult` Pydantic model
-5.3. Request includes all pipeline results (terraform, validation, timing)
-5.4. Request validates status field (success/failed)
-5.5. Result confirms DynamoDB and S3 storage
-5.6. Result includes all S3 paths (terraform, template, analysis)
-5.7. Result tracks template generation status
-5.8. Result tracks old entries deleted count
-5.9. Error field captures storage failures
+6.1. Storage agent accepts `StorageRequest` Pydantic model
+6.2. Storage agent returns `StorageResult` Pydantic model
+6.3. Request includes all pipeline results (terraform, validation, cleanup, timing)
+6.4. Request validates status field (success/failed)
+6.5. Result confirms DynamoDB and S3 storage
+6.6. Result includes all S3 paths (terraform, template, analysis)
+6.7. Result tracks template generation status
+6.8. Result tracks old entries deleted count
+6.9. Error field captures storage failures
 
 ---
 
@@ -331,7 +347,53 @@ class ValidationResult(BaseModel):
 - Timestamp is auto-generated if not provided
 - Error field is optional
 
-### 6. StorageRequest
+### 6. CleanupResult
+
+```python
+class CleanupResult(BaseModel):
+    """Result from cleaning up Terraform code"""
+    cleaned_code: str = Field(
+        description="Path to main.tf containing the cleaned Terraform code (or unchanged if skipped)",
+        min_length=1
+    )
+    resource_name: str = Field(
+        description="Target resource name",
+        pattern="^awscc_[a-z0-9_]+$"
+    )
+    cleanup_applied: bool = Field(
+        description="Whether cleanup was performed (false if skipped due to failure)"
+    )
+    cleanup_operations: List[str] = Field(
+        default_factory=list,
+        description="List of cleanup operations performed (e.g., 'Removed provider blocks', 'Removed random resources')"
+    )
+    original_code_path: Optional[str] = Field(
+        default=None,
+        description="Reference to original code before cleanup"
+    )
+    skipped_reason: Optional[str] = Field(
+        default=None,
+        description="Reason cleanup was skipped (e.g., 'Failed validation detected')"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message if cleanup failed"
+    )
+    
+    @property
+    def is_success(self) -> bool:
+        """Check if cleanup succeeded (or was intentionally skipped)"""
+        return self.error is None
+```
+
+**Validation Rules:**
+- Cleaned code must not be empty
+- Resource name must match AWSCC pattern
+- Cleanup operations list can be empty (if skipped)
+- Either cleanup_applied is True OR skipped_reason is provided
+- Error field is optional
+
+### 7. StorageRequest
 
 ```python
 class StorageRequest(BaseModel):
@@ -345,7 +407,7 @@ class StorageRequest(BaseModel):
         pattern="^(success|failed)$"
     )
     terraform_code: str = Field(
-        description="Path to main.tf containing the final Terraform code",
+        description="Path to main.tf containing the final Terraform code (cleaned)",
         min_length=1
     )
     provider_version: str = Field(
@@ -359,6 +421,10 @@ class StorageRequest(BaseModel):
         default=None,
         description="Terraform agent results"
     )
+    cleanup_result: Optional[CleanupResult] = Field(
+        default=None,
+        description="Cleanup agent results"
+    )
     execution_time_seconds: Optional[float] = Field(
         default=None,
         description="Total execution time",
@@ -370,7 +436,7 @@ class StorageRequest(BaseModel):
     )
 ```
 
-### 7. StorageResult
+### 8. StorageResult
 
 ```python
 class StorageResult(BaseModel):
