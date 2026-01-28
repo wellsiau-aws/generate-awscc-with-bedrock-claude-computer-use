@@ -801,19 +801,19 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             results["error"] = error_msg
             return json.dumps(results)
         
-        # Verify docs/resources/{resource_name}.md was created by make docs
-        docs_file_path = os.path.join(repo_path, 'docs', 'resources', f"{resource_name}.md")
+        # Verify docs/resources/{service_name}.md was created by make docs
+        docs_file_path = os.path.join(repo_path, 'docs', 'resources', f"{service_name}.md")
         print(f"\n🔍 Verifying generated documentation...")
-        print(f"   Expected file: docs/resources/{resource_name}.md")
+        print(f"   Expected file: docs/resources/{service_name}.md")
         
         if os.path.exists(docs_file_path):
             file_size = os.path.getsize(docs_file_path)
             print(f"   ✓ Documentation file exists ({file_size} bytes)")
             results["docs_generated"] = True
-            results["docs_file_path"] = f"docs/resources/{resource_name}.md"
+            results["docs_file_path"] = f"docs/resources/{service_name}.md"
             results["docs_file_size"] = file_size
         else:
-            error_msg = f"Documentation file not generated: docs/resources/{resource_name}.md"
+            error_msg = f"Documentation file not generated: docs/resources/{service_name}.md"
             print(f"   ❌ {error_msg}")
             results["docs_generated"] = False
             results["status"] = "error"
