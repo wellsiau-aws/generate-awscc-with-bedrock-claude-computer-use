@@ -70,6 +70,54 @@ terraform destroy -auto-approve
 cd ..
 ```
 
+## Testing Guidelines
+
+### Creating Test Files
+
+**CRITICAL**: Always create actual `.py` test files instead of using inline Python with `-c` flag.
+
+**Why:**
+- The `cd` command is not allowed in bash execution
+- Inline Python with `-c` flag is error-prone with multi-line code
+- Test files are reusable and can be version controlled
+- Test files provide better error messages and debugging
+
+**Pattern to Follow:**
+
+```python
+# ✅ CORRECT: Create a test file
+# 1. Create test_feature.py
+# 2. Run: python3 test_feature.py
+# 3. Clean up after successful test
+
+# ❌ INCORRECT: Don't use inline Python
+# cd /path && python3 -c "..."  # This will fail!
+```
+
+**Example:**
+
+```python
+# test_my_model.py
+from agents.models import MyModel
+
+def test_valid_model():
+    result = MyModel(field1="value1", field2="value2")
+    assert result.is_valid == True
+    print("✅ Test passed")
+
+if __name__ == '__main__':
+    test_valid_model()
+```
+
+Then run:
+```bash
+python3 test_my_model.py
+```
+
+**Cleanup:**
+- Delete test files after successful validation
+- Keep test files if they will be reused or added to test suite
+
 ## Configuration
 
 Configuration is managed via `config.py` with environment variables:
