@@ -73,7 +73,6 @@ def print_workspace_status():
     
     # Check work directory
     is_valid, message = check_terraform_work_dir()
-    print(f"\n{message}")
     
     # List work directory contents if it exists
     if os.path.exists(config.TERRAFORM_WORK_DIR):

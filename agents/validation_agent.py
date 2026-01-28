@@ -109,7 +109,7 @@ VALIDATION STEPS:
 
 8. Run terraform destroy -auto-approve in {config.TERRAFORM_WORK_DIR} (clean up)
 
-9. Store detailed results in S3 ({config.S3_BUCKET}
+9. Store detailed results in S3 ({config.S3_BUCKET} at analysis/resource/{{resource_name}}/{{YYYY-MM-DD-HH-MM-SS}}.txt
 
 10. LEAVE WORKSPACE FOR ORCHESTRATOR:
     - DO NOT remove {config.TERRAFORM_WORK_DIR}
@@ -242,7 +242,7 @@ def validation_agent(terraform_code_and_resource: str) -> str:
         
         # Use is_success and all_steps_passed properties for validation logic
         if not validation_data.is_success:
-            print(f"⚠️  Validation had issues: {validation_data.error_message}")
+            print(f"⚠️  Validation had issues: {validation_data.error}")
         else:
             print(f"✅ Validation completed successfully")
             print(f"   Resource: {validation_data.resource_name}")
@@ -284,6 +284,6 @@ def validation_agent(terraform_code_and_resource: str) -> str:
             provider_version="0.0.0",
             s3_analysis_path="analysis/resource/error/error.txt",
             workspace_reused=False,
-            error_message=f"Validation agent error: {str(e)}"
+            error=f"Validation agent error: {str(e)}"
         )
         return error_result.model_dump_json()
