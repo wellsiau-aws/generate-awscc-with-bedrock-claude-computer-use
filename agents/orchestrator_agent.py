@@ -111,6 +111,8 @@ WORKFLOW:
    - Verifies independently
    - Leaves terraform_test for your cleanup
 5. For cleaning up Terraform code (removing provider blocks) → Use the terraform_cleanup_agent tool
+   - Agent automatically skips cleanup if validation failed (preserves error context)
+   - Agent removes provider blocks only from successful validations
 6. For storing results in DynamoDB and S3 → Use the storage_agent tool
 7. For cleaning up orphaned AWS resources → Use the cleanup_agent tool (when needed)
 8. To inspect data model structure for each agent, use the get_data_model_schema
@@ -129,9 +131,9 @@ EXECUTION ORDER:
    - Validation agent reuses terraform_test (no recreation!)
    - Validation agent returns a ValidationResult object with validated fields
 5. Call terraform_cleanup_agent with the ValidationResult object from validation_agent
-   - Cleanup agent removes provider blocks and terraform blocks from successful code
-   - Cleanup agent skips cleanup if validation failed (preserves error context)
-   - Cleanup agent returns a CleanupResult object with cleaned code path
+   - For successful validations: removes provider blocks and terraform blocks
+   - For failed validations: skips cleanup and preserves original code for debugging
+   - Returns a CleanupResult object with cleanup status and metadata
 6. Call storage_agent to store results with StorageRequest object
    - Storage agent runs regardless if the previous steps are success and failure cases
    - Storage agent retuns a StorageResult 
@@ -154,7 +156,6 @@ CRITICAL REQUIREMENTS:
 - Ensure terraform_agent actually runs apply/destroy for real AWS validation
 - Pass corrected_code AND resource_name to validation_agent for independent review
 - Validation_agent stores its own results in S3 and returns validation status
-- ALWAYS call terraform_cleanup_agent before storage_agent
 - ALWAYS call storage_agent regardless of success or failure
 - For failures: pass error details, failed agent name, and partial results to storage_agent
 - For success: pass cleaned terraform code, execution results, validation results, and timing to storage_agent
@@ -178,13 +179,13 @@ pipeline_wrapper → cleanup terraform_test
 IMPORTANT UPDATES:
 - The terraform_agent returns corrected code
 - The validation_agent acts as independent reviewer and stores evaluation results in S3
-- The terraform_cleanup_agent removes provider blocks and terraform blocks
-- The storage_agent now receives cleaned code from terraform_cleanup_agent and validation results
+- The storage_agent receives cleaned code from terraform_cleanup_agent and validation results
 - This ensures that only working, validated, and cleaned code is stored in the examples
 - Agents reuse terraform_test workspace for efficiency (saves 60 seconds per resource!)
 
 FAILURE HANDLING:
-- If any agent fails (including validation_agent), still call storage_agent with failure details
+- If any agent fails (including validation_agent), still call terraform_cleanup_agent
+- Always call storage_agent with failure details after cleanup agent
 - Include which agent failed, error messages, and any partial results
 - If validation_agent fails, include validation failure details in storage
 - This maintains complete audit trail for learning and debugging

@@ -3,6 +3,7 @@ TANGO Multi-Agent Pipeline - Terraform Cleanup Agent
 Specialized agent for cleaning up Terraform code
 """
 
+import config
 from strands import Agent, tool
 from strands_tools import python_repl
 
@@ -99,14 +100,12 @@ def terraform_cleanup_agent(validation_result: ValidationResult) -> str:
         validation_result_status = validation_result.get('validation_result')
         target_resource_confirmed = validation_result.get('target_resource_confirmed', False)
         workspace_reused = validation_result.get('workspace_reused', False)
-        is_success = validation_result.get('is_success', False)
     else:
         resource_name = validation_result.resource_name
         provider_version = validation_result.provider_version
         validation_result_status = validation_result.validation_result
         target_resource_confirmed = validation_result.target_resource_confirmed
         workspace_reused = validation_result.workspace_reused
-        is_success = validation_result.is_success
     
     print(f"   Resource: {resource_name}")
     print(f"   Provider Version: {provider_version}")
@@ -114,8 +113,8 @@ def terraform_cleanup_agent(validation_result: ValidationResult) -> str:
     print(f"   Target Resource Confirmed: {target_resource_confirmed}")
     print(f"   Workspace Reused: {workspace_reused}")
        
-    # Check if validation failed
-    validation_failed = not is_success
+    # Check if validation failed by examining the validation_result field
+    validation_failed = validation_result_status != "success"
     
     # Get terraform code path
     terraform_code_path = f"{config.TERRAFORM_WORK_DIR}/main.tf"
