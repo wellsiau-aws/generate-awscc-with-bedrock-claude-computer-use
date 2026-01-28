@@ -1177,6 +1177,275 @@ class ValidationResult(TANGOBaseModel):
 
 
 # =============================================================================
+# Terraform Cleanup Agent Models
+# =============================================================================
+
+class CleanupResult(TANGOBaseModel):
+    """
+    Result from cleaning up Terraform code by removing provider blocks and test infrastructure.
+    
+    The terraform cleanup agent processes validated Terraform code to remove provider
+    configuration blocks and any test-specific infrastructure (like random resources),
+    producing production-ready examples suitable for documentation. This model captures
+    the cleaned code, tracks what operations were performed, and handles cases where
+    cleanup should be skipped (e.g., when validation failed).
+    
+    The cleanup agent runs after validation and before storage, ensuring that only
+    clean, production-ready code is stored in the examples directory.
+    
+    Attributes:
+        cleaned_code: Path to the main.tf file containing the cleaned Terraform code.
+                     Must not be empty. If cleanup was skipped, this points to the
+                     original unchanged code. This is the code that will be stored.
+        resource_name: Target AWS CloudControl resource name (e.g., "awscc_s3_bucket").
+                      Must match the AWSCC naming pattern.
+        cleanup_applied: Whether cleanup operations were actually performed. False
+                        indicates cleanup was skipped (e.g., due to failed validation).
+                        True indicates provider blocks and test infrastructure were removed.
+        cleanup_operations: List of cleanup operations that were performed. Each entry
+                           describes a specific change made (e.g., "Removed provider blocks",
+                           "Removed random_string resources"). Empty list if cleanup was
+                           skipped. Useful for audit trail and understanding what changed.
+        original_code_path: Optional reference to the original code before cleanup.
+                           Useful for comparison and debugging. May be None if cleanup
+                           was skipped or if original code wasn't preserved.
+        skipped_reason: Optional explanation of why cleanup was skipped. Typically set
+                       when validation failed (e.g., "Failed validation detected - keeping
+                       original code"). None if cleanup was performed normally.
+        error: Optional error message if cleanup failed unexpectedly. When populated,
+              indicates that the cleanup process encountered an issue. None if cleanup
+              succeeded or was intentionally skipped.
+    
+    Computed Properties:
+        is_success: Returns True if no error occurred (cleanup succeeded or was
+                   intentionally skipped). False only if an unexpected error occurred.
+    
+    Validation:
+        - cleaned_code must not be empty (min_length=1)
+        - resource_name must match pattern: ^awscc_[a-z0-9_]+$
+        - cleanup_applied is required
+        - cleanup_operations defaults to empty list if not provided
+        - original_code_path is optional
+        - skipped_reason is optional
+        - error is optional
+        - Either cleanup_applied is True OR skipped_reason should be provided
+    
+    Usage Examples:
+        # Parse successful cleanup from JSON
+        >>> json_str = '''
+        ... {
+        ...     "cleaned_code": "terraform_test/main.tf",
+        ...     "resource_name": "awscc_s3_bucket",
+        ...     "cleanup_applied": true,
+        ...     "cleanup_operations": [
+        ...         "Removed provider blocks",
+        ...         "Removed random_string resources"
+        ...     ],
+        ...     "original_code_path": "terraform_test/main.tf.backup"
+        ... }
+        ... '''
+        >>> result = CleanupResult.model_validate_json(json_str)
+        >>> print(result.resource_name)
+        awscc_s3_bucket
+        
+        # Check if cleanup was applied
+        >>> if result.cleanup_applied:
+        ...     print("Cleanup operations performed:")
+        ...     for op in result.cleanup_operations:
+        ...         print(f"  - {op}")
+        Cleanup operations performed:
+          - Removed provider blocks
+          - Removed random_string resources
+        
+        # Check if cleanup succeeded
+        >>> if result.is_success:
+        ...     print(f"Cleaned code available at: {result.cleaned_code}")
+        Cleaned code available at: terraform_test/main.tf
+        
+        # Create skipped cleanup result (validation failed)
+        >>> skipped_result = CleanupResult(
+        ...     cleaned_code="terraform_test/main.tf",
+        ...     resource_name="awscc_lambda_function",
+        ...     cleanup_applied=False,
+        ...     cleanup_operations=[],
+        ...     skipped_reason="Failed validation detected - keeping original code for debugging"
+        ... )
+        >>> print(skipped_result.cleanup_applied)
+        False
+        >>> print(skipped_result.skipped_reason)
+        Failed validation detected - keeping original code for debugging
+        >>> print(skipped_result.is_success)
+        True
+        
+        # Create cleanup with error
+        >>> error_result = CleanupResult(
+        ...     cleaned_code="terraform_test/main.tf",
+        ...     resource_name="awscc_dynamodb_table",
+        ...     cleanup_applied=False,
+        ...     cleanup_operations=[],
+        ...     error="Failed to parse Terraform code: Invalid HCL syntax"
+        ... )
+        >>> print(error_result.is_success)
+        False
+        >>> print(error_result.error)
+        Failed to parse Terraform code: Invalid HCL syntax
+        
+        # Create minimal successful cleanup
+        >>> minimal_result = CleanupResult(
+        ...     cleaned_code="terraform_test/main.tf",
+        ...     resource_name="awscc_ec2_instance",
+        ...     cleanup_applied=True,
+        ...     cleanup_operations=["Removed provider blocks"]
+        ... )
+        >>> print(minimal_result.cleanup_operations)
+        ['Removed provider blocks']
+        
+        # Create cleanup with original code reference
+        >>> with_backup_result = CleanupResult(
+        ...     cleaned_code="terraform_test/main.tf",
+        ...     resource_name="awscc_rds_db_instance",
+        ...     cleanup_applied=True,
+        ...     cleanup_operations=[
+        ...         "Removed provider blocks",
+        ...         "Removed random_password resources",
+        ...         "Removed random_id resources"
+        ...     ],
+        ...     original_code_path="terraform_test/main.tf.original"
+        ... )
+        >>> print(with_backup_result.original_code_path)
+        terraform_test/main.tf.original
+        
+        # Serialize back to JSON
+        >>> json_output = result.model_dump_json()
+    
+    Notes:
+        - cleanup_applied=False with skipped_reason indicates intentional skip (not an error)
+        - cleanup_applied=False with error indicates unexpected failure
+        - cleanup_operations provides audit trail of what was changed
+        - original_code_path allows comparison between original and cleaned code
+        - The is_success property returns True for both successful cleanup and intentional skips
+        - Only returns False if an unexpected error occurred
+        - Cleanup is typically skipped when validation fails to preserve debugging information
+        - Provider blocks are removed to make code suitable for documentation
+        - Random resources are removed as they're test infrastructure, not production code
+        - All validation happens automatically on model instantiation
+        - Invalid data raises pydantic.ValidationError with detailed error messages
+        - This model is used between validation_agent and storage_agent in the pipeline
+    """
+    
+    cleaned_code: str = Field(
+        description="Path to main.tf containing the cleaned Terraform code (or unchanged if skipped)",
+        min_length=1,
+        examples=[
+            "terraform_test/main.tf",
+            "terraform_test/main.tf",
+            "terraform_test/main_cleaned.tf"
+        ]
+    )
+    
+    resource_name: str = Field(
+        description="Target AWS CloudControl resource name",
+        pattern=r"^awscc_[a-z0-9_]+$",
+        examples=["awscc_s3_bucket", "awscc_lambda_function", "awscc_dynamodb_table"]
+    )
+    
+    cleanup_applied: bool = Field(
+        description="Whether cleanup operations were performed (false if skipped due to failure)"
+    )
+    
+    cleanup_operations: List[str] = Field(
+        default_factory=list,
+        description="List of cleanup operations performed (e.g., 'Removed provider blocks', 'Removed random resources')",
+        examples=[
+            [],
+            ["Removed provider blocks"],
+            ["Removed provider blocks", "Removed random_string resources"],
+            ["Removed provider blocks", "Removed random_password resources", "Removed random_id resources"]
+        ]
+    )
+    
+    original_code_path: Optional[str] = Field(
+        default=None,
+        description="Reference to original code before cleanup (for comparison/debugging)",
+        examples=[
+            None,
+            "terraform_test/main.tf.backup",
+            "terraform_test/main.tf.original",
+            "terraform_test/main_before_cleanup.tf"
+        ]
+    )
+    
+    skipped_reason: Optional[str] = Field(
+        default=None,
+        description="Reason cleanup was skipped (e.g., 'Failed validation detected')",
+        examples=[
+            None,
+            "Failed validation detected - keeping original code for debugging",
+            "Validation failed - skipping cleanup to preserve error context",
+            "Terraform apply failed - keeping original code"
+        ]
+    )
+    
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message if cleanup failed unexpectedly",
+        examples=[
+            None,
+            "Failed to parse Terraform code: Invalid HCL syntax",
+            "Failed to write cleaned code: Permission denied",
+            "Failed to backup original code: Disk full"
+        ]
+    )
+    
+    @property
+    def is_success(self) -> bool:
+        """
+        Check if cleanup succeeded (or was intentionally skipped).
+        
+        Returns True if no error occurred, indicating that either:
+        1. Cleanup was performed successfully (cleanup_applied=True, error=None)
+        2. Cleanup was intentionally skipped (cleanup_applied=False, skipped_reason set, error=None)
+        
+        Returns False only if an unexpected error occurred during cleanup.
+        
+        This property distinguishes between intentional skips (which are success cases)
+        and unexpected failures (which are error cases).
+        
+        Returns:
+            bool: True if cleanup succeeded or was intentionally skipped, False if error occurred.
+        
+        Examples:
+            >>> result = CleanupResult(
+            ...     cleaned_code="terraform_test/main.tf",
+            ...     resource_name="awscc_s3_bucket",
+            ...     cleanup_applied=True,
+            ...     cleanup_operations=["Removed provider blocks"]
+            ... )
+            >>> result.is_success
+            True
+            
+            >>> skipped_result = CleanupResult(
+            ...     cleaned_code="terraform_test/main.tf",
+            ...     resource_name="awscc_lambda_function",
+            ...     cleanup_applied=False,
+            ...     skipped_reason="Failed validation detected"
+            ... )
+            >>> skipped_result.is_success
+            True
+            
+            >>> error_result = CleanupResult(
+            ...     cleaned_code="terraform_test/main.tf",
+            ...     resource_name="awscc_dynamodb_table",
+            ...     cleanup_applied=False,
+            ...     error="Failed to parse Terraform code"
+            ... )
+            >>> error_result.is_success
+            False
+        """
+        return self.error is None
+
+
+# =============================================================================
 # Storage Agent Models
 # =============================================================================
 
@@ -1370,6 +1639,11 @@ class StorageRequest(TANGOBaseModel):
     terraform_result: Optional[TerraformResult] = Field(
         default=None,
         description="Terraform agent execution results (nested model, may be None if terraform agent didn't run)"
+    )
+    
+    cleanup_result: Optional[CleanupResult] = Field(
+        default=None,
+        description="Cleanup agent results (nested model, may be None if cleanup agent didn't run)"
     )
     
     execution_time_seconds: Optional[float] = Field(
@@ -1915,6 +2189,7 @@ def get_all_agent_schemas() -> str:
         TerraformLifecycleStep,
         TerraformResult,
         ValidationResult,
+        CleanupResult,
         StorageRequest,
         StorageResult
     ]
