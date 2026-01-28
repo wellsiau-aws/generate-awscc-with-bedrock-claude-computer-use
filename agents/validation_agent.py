@@ -37,20 +37,20 @@ IMPORTANT:
 - Return a complete JSON object matching this structure
 
 CRITICAL WORKING DIRECTORY REQUIREMENT:
-- ALWAYS use the directory: {{config.TERRAFORM_WORK_DIR}}
+- ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
 - This directory was created by documentation_agent and used by terraform_agent
 - REUSE IT - don't recreate unless invalid
 - Do NOT run terraform init if .terraform/ already exists
-- LEAVE {{config.TERRAFORM_WORK_DIR}} for orchestrator cleanup (DO NOT CLEAN UP)
+- LEAVE {config.TERRAFORM_WORK_DIR} for orchestrator cleanup (DO NOT CLEAN UP)
 
 WORKSPACE REUSE LOGIC:
-1. Check if {{config.TERRAFORM_WORK_DIR}} exists and is valid:
+1. Check if {config.TERRAFORM_WORK_DIR} exists and is valid:
    - Has .terraform/ directory → Providers already downloaded, skip init
    - Has main.tf → Review it first before modifying
    - Has .terraform.lock.hcl → Providers locked, ready to use
 
 2. If workspace is valid:
-   - READ existing {{config.TERRAFORM_WORK_DIR}}/main.tf first
+   - READ existing {config.TERRAFORM_WORK_DIR}/main.tf first
    - Compare with the code you need to validate
    - If they're the same → Use existing, no update needed
    - If different → Update main.tf with code to validate
@@ -58,7 +58,7 @@ WORKSPACE REUSE LOGIC:
    - Proceed directly to validate/plan/apply
 
 3. If workspace is invalid or missing:
-   - Create fresh {{config.TERRAFORM_WORK_DIR}}
+   - Create fresh {config.TERRAFORM_WORK_DIR}
    - Create main.tf with provider blocks
    - Run terraform init
    - Then proceed with validation
@@ -77,8 +77,8 @@ YOUR TASK:
 5. Return simple success/failed status
 
 REGION CONFIGURATION:
-- S3 bucket to store results: {{config.AWS_REGION}} region ({{config.S3_BUCKET}} bucket)
-- AWS operations: {{config.AWS_REGION}} region
+- S3 bucket to store results: {config.AWS_REGION} region ({config.S3_BUCKET} bucket)
+- AWS operations: {config.AWS_REGION} region
 
 CRITICAL REQUIREMENTS:
 - You are INDEPENDENT from terraform agent - run your own tests
@@ -86,7 +86,7 @@ CRITICAL REQUIREMENTS:
 - Must run actual terraform apply and destroy
 - Check that target resource is in the Terraform code
 - If terraform apply fails for any reason, mark as FAILED
-- Store detailed logs in S3 ({{config.S3_BUCKET}} at analysis/resource/{{resource_name}}/{{YYYY-MM-DD-HH-MM-SS}}.txt
+- Store detailed logs in S3 ({config.S3_BUCKET} at analysis/resource/{{resource_name}}/{{YYYY-MM-DD-HH-MM-SS}}.txt
 - NEVER MODIFY OR FIX CODE - test exactly as provided by terraform agent
 
 VALIDATION STEPS:
@@ -94,25 +94,25 @@ VALIDATION STEPS:
 
 2. Verify code contains target resource (e.g., "awscc_s3_bucket")
 
-3. Check if {{config.TERRAFORM_WORK_DIR}} is valid:
+3. Check if {config.TERRAFORM_WORK_DIR} is valid:
    - If valid: READ existing main.tf first, compare, update only if needed ✅ SMART
    - If invalid: Create fresh, run init
 
-4. If update needed: Update main.tf in {{config.TERRAFORM_WORK_DIR}} with code to validate
+4. If update needed: Update main.tf in {config.TERRAFORM_WORK_DIR} with code to validate
    If no update needed: Use existing main.tf as-is
 
-5. Run terraform validate in {{config.TERRAFORM_WORK_DIR}} (skip init if .terraform/ exists)
+5. Run terraform validate in {config.TERRAFORM_WORK_DIR} (skip init if .terraform/ exists)
 
-6. Run terraform plan in {{config.TERRAFORM_WORK_DIR}}
+6. Run terraform plan in {config.TERRAFORM_WORK_DIR}
 
-7. Run terraform apply -auto-approve in {{config.TERRAFORM_WORK_DIR}} (create real resources) - DO NOT MODIFY THE CODE, test it exactly as provided
+7. Run terraform apply -auto-approve in {config.TERRAFORM_WORK_DIR} (create real resources) - DO NOT MODIFY THE CODE, test it exactly as provided
 
-8. Run terraform destroy -auto-approve in {{config.TERRAFORM_WORK_DIR}} (clean up)
+8. Run terraform destroy -auto-approve in {config.TERRAFORM_WORK_DIR} (clean up)
 
-9. Store detailed results in S3 ({{config.S3_BUCKET}}
+9. Store detailed results in S3 ({config.S3_BUCKET}
 
 10. LEAVE WORKSPACE FOR ORCHESTRATOR:
-    - DO NOT remove {{config.TERRAFORM_WORK_DIR}}
+    - DO NOT remove {config.TERRAFORM_WORK_DIR}
     - Orchestrator will handle final cleanup
     - Your job is to validate, not tear down
 
@@ -203,17 +203,8 @@ def validation_agent(terraform_code_and_resource: str) -> str:
     print("="*80)
     
     try:
-        # Create system prompt with actual config values
-        system_prompt = VALIDATION_SYSTEM_PROMPT.replace(
-            "{{config.AWS_REGION}}", config.AWS_REGION
-        ).replace(
-            "{{config.S3_BUCKET}}", config.S3_BUCKET
-        ).replace(
-            "{{config.TERRAFORM_WORK_DIR}}", config.TERRAFORM_WORK_DIR
-        )
-        
         agent = Agent(
-            system_prompt=system_prompt,
+            system_prompt=VALIDATION_SYSTEM_PROMPT,
             tools=[shell, python_repl, use_aws],
             structured_output_model=ValidationResult  # ← Add structured output
         )

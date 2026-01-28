@@ -79,12 +79,12 @@ YOUR TASKS:
 5. Return clean, structured execution summary
 
 REGION CONFIGURATION:
-- DynamoDB: {{config.AWS_REGION}} region ({{config.DYNAMODB_TABLE}} table)
-- S3: {{config.AWS_REGION}} region ({{config.S3_BUCKET}} bucket)
+- DynamoDB: {config.AWS_REGION} region ({config.DYNAMODB_TABLE} table)
+- S3: {config.AWS_REGION} region ({config.S3_BUCKET} bucket)
 
-CRITICAL: Always specify region="{{config.AWS_REGION}}" in ALL use_aws tool calls.
+CRITICAL: Always specify region="{config.AWS_REGION}" in ALL use_aws tool calls.
 
-DYNAMODB SCHEMA ({{config.DYNAMODB_TABLE}} table):
+DYNAMODB SCHEMA ({config.DYNAMODB_TABLE} table):
 - resource_name (Partition Key): AWS CloudControl resource name
 - timestamp (Sort Key): Unix timestamp
 - status: "success" or "failed"
@@ -107,7 +107,7 @@ WORKFLOW:
    - FAILED: failed/resources/{{resource_name}}/{{service_name}}.tf
 6. ONLY FOR SUCCESS: Generate and store template:
    - Use the template_replacer tool to create the resource-specific template
-   - Reads generic template from S3: s3://{{config.S3_BUCKET}}/templates/resources/generic_resource.md.tmpl
+   - Reads generic template from S3: s3://{config.S3_BUCKET}/templates/resources/generic_resource.md.tmpl
    - Pass the resource_name, service_name, a brief description, and a descriptive heading
    - Store template to S3 at templates/resources/{{service_name}}.md.tmpl
 7. Create simplified DynamoDB entry with:

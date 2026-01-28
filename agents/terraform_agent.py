@@ -71,20 +71,20 @@ When you need to add dependency resources to fix validation errors:
    - Example: "# Using aws_vpc because awscc_vpc validation failed"
 
 CRITICAL WORKING DIRECTORY REQUIREMENT:
-- ALWAYS use the directory: {{config.TERRAFORM_WORK_DIR}}
+- ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
 - This directory was created by documentation_agent - REUSE IT
 - Do NOT recreate the directory if it already exists
 - Do NOT run terraform init if .terraform/ already exists
-- LEAVE {{config.TERRAFORM_WORK_DIR}} ready for next agent (DO NOT CLEAN UP)
+- LEAVE {config.TERRAFORM_WORK_DIR} ready for next agent (DO NOT CLEAN UP)
 
 WORKSPACE REUSE LOGIC:
-1. Check if {{config.TERRAFORM_WORK_DIR}} exists and is valid:
+1. Check if {config.TERRAFORM_WORK_DIR} exists and is valid:
    - Has .terraform/ directory → Providers already downloaded, skip init
    - Has main.tf → Review it first before modifying
    - Has .terraform.lock.hcl → Providers locked, ready to use
 
 2. If workspace is valid:
-   - READ existing {{config.TERRAFORM_WORK_DIR}}/main.tf first
+   - READ existing {config.TERRAFORM_WORK_DIR}/main.tf first
    - Compare with the terraform code you received
    - If they're the same or similar → Use existing, no update needed
    - If different → Update main.tf with new code
@@ -92,7 +92,7 @@ WORKSPACE REUSE LOGIC:
    - Proceed directly to validate/plan/apply
 
 3. If workspace is invalid or missing:
-   - Create fresh {{config.TERRAFORM_WORK_DIR}}
+   - Create fresh {config.TERRAFORM_WORK_DIR}
    - Create main.tf with provider blocks
    - Run terraform init
    - Then proceed with validation
@@ -114,11 +114,11 @@ CRITICAL PROVIDER REQUIREMENTS:
 MANDATORY STEPS (IN ORDER):
 1. Extract terraform code and provider version from input
 
-2. Check if {{config.TERRAFORM_WORK_DIR}} is valid:
+2. Check if {config.TERRAFORM_WORK_DIR} is valid:
    - If valid: READ existing main.tf first, compare, update only if needed ✅ SMART
    - If invalid: Create fresh, run init
 
-3. If update needed: Update main.tf in {{config.TERRAFORM_WORK_DIR}} with terraform code
+3. If update needed: Update main.tf in {config.TERRAFORM_WORK_DIR} with terraform code
    If no update needed: Use existing main.tf as-is
 
 4. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id):
@@ -127,20 +127,20 @@ MANDATORY STEPS (IN ORDER):
    - If failed or not found, use AWS provider version with explanatory comment
    - Create the required supporting resources and use proper resource references
 
-5. Run terraform validate in {{config.TERRAFORM_WORK_DIR}} (fix syntax errors if needed)
+5. Run terraform validate in {config.TERRAFORM_WORK_DIR} (fix syntax errors if needed)
    - Track this step in lifecycle_steps with TerraformLifecycleStep
 
-6. Run terraform plan in {{config.TERRAFORM_WORK_DIR}}
+6. Run terraform plan in {config.TERRAFORM_WORK_DIR}
    - Track this step in lifecycle_steps with TerraformLifecycleStep
 
-7. **terraform apply -auto-approve** in {{config.TERRAFORM_WORK_DIR}} (MANDATORY - create real AWS resources)
+7. **terraform apply -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - create real AWS resources)
    - Track this step in lifecycle_steps with TerraformLifecycleStep
 
-8. **terraform destroy -auto-approve** in {{config.TERRAFORM_WORK_DIR}} (MANDATORY - clean up resources)
+8. **terraform destroy -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - clean up resources)
    - Track this step in lifecycle_steps with TerraformLifecycleStep
 
 9. LEAVE WORKSPACE READY:
-   - DO NOT remove {{config.TERRAFORM_WORK_DIR}}
+   - DO NOT remove {config.TERRAFORM_WORK_DIR}
    - Validation agent will reuse this workspace
    - Your job is to correct code, not tear down workspace
 
