@@ -10,6 +10,11 @@ from datetime import datetime
 from strands import Agent, tool
 from strands_tools import python_repl, use_aws
 import config
+from agents.models import StorageRequest, StorageResult, get_model_schema_description
+
+# Generate schemas dynamically for both input and output models
+STORAGE_REQUEST_SCHEMA = get_model_schema_description(StorageRequest)
+STORAGE_RESULT_SCHEMA = get_model_schema_description(StorageResult)
 
 def create_template_replacement_tool():
     """Create a programmatic template replacement tool"""
@@ -63,7 +68,7 @@ def create_template_replacement_tool():
     
     return template_replacer
 
-STORAGE_SYSTEM_PROMPT = """
+STORAGE_SYSTEM_PROMPT = f"""
 You are a specialized storage agent for pipeline results and template generation.
 
 YOUR TASKS:
@@ -74,23 +79,23 @@ YOUR TASKS:
 5. Return clean, structured execution summary
 
 REGION CONFIGURATION:
-- DynamoDB: {config.AWS_REGION} region ({config.DYNAMODB_TABLE} table)
-- S3: {config.AWS_REGION} region ({config.S3_BUCKET} bucket)
+- DynamoDB: {{config.AWS_REGION}} region ({{config.DYNAMODB_TABLE}} table)
+- S3: {{config.AWS_REGION}} region ({{config.S3_BUCKET}} bucket)
 
-CRITICAL: Always specify region="{config.AWS_REGION}" in ALL use_aws tool calls.
+CRITICAL: Always specify region="{{config.AWS_REGION}}" in ALL use_aws tool calls.
 
-DYNAMODB SCHEMA ({config.DYNAMODB_TABLE} table):
+DYNAMODB SCHEMA ({{config.DYNAMODB_TABLE}} table):
 - resource_name (Partition Key): AWS CloudControl resource name
 - timestamp (Sort Key): Unix timestamp
 - status: "success" or "failed"
 - source: "tango_pipeline" (identifies entries created by the pipeline)
 - s3_terraform_link: S3 path to terraform file 
-  * SUCCESS: examples/resources/{resource_name}/{service_name}.tf
-  * FAILED: failed/resources/{resource_name}/{service_name}.tf
+  * SUCCESS: examples/resources/{{resource_name}}/{{service_name}}.tf
+  * FAILED: failed/resources/{{resource_name}}/{{service_name}}.tf
 - s3_template_link: S3 path to template file (ONLY for success, omit for failures)
-  * SUCCESS: templates/resources/{resource_name}.md.tmpl
+  * SUCCESS: templates/resources/{{resource_name}}.md.tmpl
   * FAILED: (not created)
-- s3_analysis_link: S3 path to detailed validation results (analysis/resource/{resource_name}/{date}.txt)
+- s3_analysis_link: S3 path to detailed validation results (analysis/resource/{{resource_name}}/{{date}}.txt)
 
 WORKFLOW:
 1. Extract service name from resource_name (remove "awscc_" prefix)
@@ -98,13 +103,13 @@ WORKFLOW:
 3. Determine if execution was SUCCESS or FAILED
 4. Clean up old entries: Query DynamoDB for existing entries with same resource_name AND source=tango_pipeline, if found, delete them
 5. Store .tf file directly to S3:
-   - SUCCESS: examples/resources/{resource_name}/{service_name}.tf
-   - FAILED: failed/resources/{resource_name}/{service_name}.tf
+   - SUCCESS: examples/resources/{{resource_name}}/{{service_name}}.tf
+   - FAILED: failed/resources/{{resource_name}}/{{service_name}}.tf
 6. ONLY FOR SUCCESS: Generate and store template:
    - Use the template_replacer tool to create the resource-specific template
-   - Reads generic template from S3: s3://{config.S3_BUCKET}/templates/resources/generic_resource.md.tmpl
+   - Reads generic template from S3: s3://{{config.S3_BUCKET}}/templates/resources/generic_resource.md.tmpl
    - Pass the resource_name, service_name, a brief description, and a descriptive heading
-   - Store template to S3 at templates/resources/{service_name}.md.tmpl
+   - Store template to S3 at templates/resources/{{service_name}}.md.tmpl
 7. Create simplified DynamoDB entry with:
    - resource_name (partition key)
    - timestamp (sort key)
@@ -124,20 +129,31 @@ TEMPLATE REPLACEMENT EXAMPLES:
 
 IMPORTANT: Always use the template_replacer tool - do NOT try to do template replacements manually.
 
-OUTPUT FORMAT:
-PIPELINE EXECUTION [STATUS]
-========================================
-Resource: {resource_name}
-Status: [SUCCESS/FAILED]
+INPUT FORMAT:
+You will receive a JSON string containing a StorageRequest object with this structure:
 
-Storage:
-- Stored Terraform code in S3 at {s3_terraform_link}
-- Stored template in S3 at {s3_template_link} (ONLY for SUCCESS)
-- Stored validation analysis in S3 at {s3_analysis_link}
-- Logged execution details to DynamoDB with S3 links
+{STORAGE_REQUEST_SCHEMA}
+
+OUTPUT FORMAT:
+You must return a JSON string containing a StorageResult object with this structure:
+
+{STORAGE_RESULT_SCHEMA}
+
+EXAMPLE OUTPUT:
+{{{{
+  "status": "success",
+  "resource_name": "awscc_s3_bucket",
+  "provider_version": "1.53.0",
+  "dynamodb_stored": true,
+  "s3_terraform_link": "examples/resources/awscc_s3_bucket.tf",
+  "s3_template_link": "templates/resources/awscc_s3_bucket.md.tmpl",
+  "s3_analysis_link": "analysis/resource/awscc_s3_bucket.txt",
+  "template_generated": true,
+  "old_entries_deleted": 2,
+  "execution_time": 125.5
+}}}}
 
 Note: Templates are only created for successful executions to avoid triggering artifacts for pull requests.
-========================================
 """
 
 @tool
@@ -146,44 +162,76 @@ def storage_agent(storage_request: str) -> str:
     Store pipeline results in DynamoDB and S3, generate resource-specific templates.
 
     Args:
-        storage_request: JSON string with execution results
+        storage_request: JSON string with execution results (StorageRequest model)
 
     Returns:
-        Storage confirmation with DynamoDB and S3 locations
+        JSON string with storage confirmation (StorageResult model)
     """
     print("\n" + "="*80)
     print("💾 STORAGE AGENT - STARTING")
     print("="*80)
     
     try:
+        # Parse input to StorageRequest model for validation
+        try:
+            request = StorageRequest.model_validate_json(storage_request)
+            print(f"   Parsed StorageRequest for: {request.resource_name}")
+            print(f"   Status: {request.status}")
+            print(f"   Validation result: {request.validation_result.validation_result}")
+        except Exception as e:
+            print(f"   Warning: Failed to parse StorageRequest: {e}")
+            print(f"   Continuing with raw JSON input...")
+        
         template_replacer = create_template_replacement_tool()
         
-        # Create system prompt with actual config values
-        system_prompt = STORAGE_SYSTEM_PROMPT.replace(
-            "{config.AWS_REGION}", config.AWS_REGION
-        ).replace(
-            "{config.S3_BUCKET}", config.S3_BUCKET
-        ).replace(
-            "{config.DYNAMODB_TABLE}", config.DYNAMODB_TABLE
-        )
-        
         agent = Agent(
-            system_prompt=system_prompt,
-            tools=[use_aws, python_repl, template_replacer]
+            system_prompt=STORAGE_SYSTEM_PROMPT,
+            tools=[use_aws, python_repl, template_replacer],
+            structured_output_model=StorageResult
         )
         
         response = agent(storage_request)
+        
+        # Access structured output
+        if hasattr(response, 'structured_output') and response.structured_output:
+            result = response.structured_output
+            print(f"\n   ✅ Structured output validated: {result.status}")
+            print(f"   DynamoDB stored: {result.dynamodb_stored}")
+            print(f"   S3 Terraform link: {result.s3_terraform_link}")
+            if result.s3_template_link:
+                print(f"   S3 Template link: {result.s3_template_link}")
+            print(f"   S3 Analysis link: {result.s3_analysis_link}")
+            print(f"   Template generated: {result.template_generated}")
+            print(f"   Old entries deleted: {result.old_entries_deleted}")
+            
+            # Return JSON for backward compatibility
+            json_output = result.model_dump_json()
+        else:
+            print(f"   ⚠️  No structured output, using raw response")
+            json_output = str(response)
         
         print("\n" + "-"*80)
         print("✅ STORAGE AGENT - COMPLETED")
         print(f"   Stored results in DynamoDB and S3")
         print("="*80 + "\n")
         
-        return str(response)
+        return json_output
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ STORAGE AGENT - FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
         
-        return f"Error in storage agent: {str(e)}"
+        # Return error as StorageResult JSON
+        error_result = StorageResult(
+            status="failed",
+            resource_name="unknown",
+            provider_version="0.0.0",
+            dynamodb_stored=False,
+            s3_terraform_link="failed/resources/unknown.tf",
+            s3_analysis_link="analysis/resource/unknown.txt",
+            template_generated=False,
+            old_entries_deleted=0,
+            error=f"Storage agent error: {str(e)}"
+        )
+        return error_result.model_dump_json()

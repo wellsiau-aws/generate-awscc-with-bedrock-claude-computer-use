@@ -25,17 +25,14 @@ CLEANUP RULES (ONLY FOR SUCCESSFUL CODE):
    - `"example-bucket-${random_id.bucket_suffix.hex}"` → `"example-bucket"`
    - `"test-function-${random_string.suffix.result}"` → `"example-function"`
    - Any random suffixes or dynamic references → simple static names
-6. Remove excessive comments that explain testing or validation purposes
-7. Remove comments like "# Bucket name must be globally unique" unless essential
-8. Keep only essential comments that explain configuration choices
-9. Make the code look clean and production-ready like official Terraform Registry examples
-10. Keep all resource configurations and outputs intact
-11. Ensure proper formatting and indentation
+6. Remove comments that explain testing or validation purposes
+7. Remove output sections
+8. Make the code look clean and production-ready like official Terraform Registry examples
+9. Keep all resource configurations intact
+10. Ensure proper formatting and indentation
 
 WHAT TO KEEP:
 - All main AWSCC resource configurations
-- Essential configuration comments
-- Output blocks (but clean up any random references)
 - Variable references (if any, but clean up random ones)
 - Clean, descriptive resource names
 

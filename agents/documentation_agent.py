@@ -9,8 +9,12 @@ from strands import Agent, tool
 from strands_tools import python_repl, use_llm, http_request
 import config
 from .resource_tools import check_resource_status, fetch_example_code, list_available_examples
+from .models import DocumentationResult, get_model_schema_description
 
-DOCUMENTATION_SYSTEM_PROMPT = """
+# Generate schema dynamically from the model
+DOCUMENTATION_RESULT_SCHEMA = get_model_schema_description(DocumentationResult)
+
+DOCUMENTATION_SYSTEM_PROMPT = f"""
 You are a specialized Terraform documentation generator for AWS CloudControl resources.
 
 YOUR ROLE: Setup Owner
@@ -18,6 +22,17 @@ You are responsible for creating and initializing the Terraform workspace that o
 
 YOUR TASK:
 Generate clean Terraform configuration code matching Terraform Registry example patterns.
+
+OUTPUT FORMAT - DocumentationResult Model:
+You must return a valid DocumentationResult JSON object with the following structure:
+
+{DOCUMENTATION_RESULT_SCHEMA}
+
+IMPORTANT:
+- All REQUIRED fields must be provided
+- terraform_code must not be empty (use a comment like "# Error: ..." if generation fails)
+- The model will automatically validate field patterns and types
+- Return a complete JSON object matching this structure
 
 TOOLS AVAILABLE FOR SUPPLEMENTAL RESOURCES:
 1. check_resource_status(resource_name) - Check if an AWSCC resource has been validated
@@ -109,6 +124,7 @@ terraform {{
 5. Run Terraform init FROM INSIDE {config.TERRAFORM_WORK_DIR} (important before using any other terraform command):
    - Command: cd {config.TERRAFORM_WORK_DIR} && terraform init
    - OR: terraform -chdir={config.TERRAFORM_WORK_DIR} init
+   - Set workspace_initialized=true after successful init
    
 6. Discover resource schema FROM INSIDE {config.TERRAFORM_WORK_DIR}:
    - Command: cd {config.TERRAFORM_WORK_DIR} && terraform providers schema -json | jq '.provider_schemas."registry.terraform.io/hashicorp/awscc".resource_schemas.awscc_RESOURCE_NAME'
@@ -150,7 +166,17 @@ OUTPUT STYLE:
 - Avoid complex supporting infrastructure - use simple references or existing resources when possible
 - If supporting resources are absolutely required, keep them minimal
 
-OUTPUT: Valid Terraform .tf file content starting with resources (NOT including terraform/provider blocks).
+RETURN FORMAT:
+Return a DocumentationResult JSON object with all required fields populated.
+Example:
+{{
+  "terraform_code": "terraform_test/main.tf",
+  "resource_name": "awscc_s3_bucket",
+  "provider_version": "1.53.0",
+  "workspace_initialized": true,
+  "supplemental_resources": ["awscc_iam_role"],
+  "supplemental_strategy": "IAM role needed for bucket notifications"
+}}
 """
 
 @tool
@@ -162,7 +188,7 @@ def documentation_agent(resource_data: str) -> str:
         resource_data: JSON string or text containing resource name and provider version info
 
     Returns:
-        Complete Terraform configuration code
+        JSON string containing DocumentationResult model
     """
     print("\n" + "="*80)
     print("📝 DOCUMENTATION AGENT - STARTING")
@@ -178,7 +204,8 @@ def documentation_agent(resource_data: str) -> str:
         
         agent = Agent(
             system_prompt=system_prompt,
-            tools=[http_request, use_llm, python_repl, check_resource_status, fetch_example_code, list_available_examples]
+            tools=[http_request, use_llm, python_repl, check_resource_status, fetch_example_code, list_available_examples],
+            structured_output_model=DocumentationResult  # ← Add structured output
         )
         
         documentation_query = f"""
@@ -198,20 +225,42 @@ def documentation_agent(resource_data: str) -> str:
         
         Resource information:
         {resource_data}
+        
+        Return a DocumentationResult JSON object with all required fields.
         """
         
-        response = agent(documentation_query)
+        result = agent(documentation_query)
+        documentation_data: DocumentationResult = result.structured_output  # ← Type-safe access
+        
+        # Validate before returning
+        if not documentation_data.is_success:
+            print(f"⚠️  Documentation generation had issues: {documentation_data.error}")
+        else:
+            print(f"✅ Generated code at: {documentation_data.terraform_code}")
+            print(f"   Workspace initialized: {documentation_data.workspace_initialized}")
+            if documentation_data.supplemental_resources:
+                print(f"   Supplemental resources: {', '.join(documentation_data.supplemental_resources)}")
         
         print("\n" + "-"*80)
         print("✅ DOCUMENTATION AGENT - COMPLETED")
         print(f"   Generated Terraform code")
         print("="*80 + "\n")
         
-        return str(response)
+        # Return JSON for backward compatibility with orchestrator
+        return documentation_data.model_dump_json()
+        
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ DOCUMENTATION AGENT - FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
         
-        return f"Error in documentation agent: {str(e)}"
+        # Return error as DocumentationResult for consistency
+        error_result = DocumentationResult(
+            terraform_code="",
+            resource_name="ERROR",
+            provider_version="0.0.0",
+            workspace_initialized=False,
+            error=f"Documentation agent error: {str(e)}"
+        )
+        return error_result.model_dump_json()

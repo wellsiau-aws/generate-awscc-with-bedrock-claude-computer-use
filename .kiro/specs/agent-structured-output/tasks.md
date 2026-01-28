@@ -79,59 +79,64 @@ This implementation adds Pydantic structured output to all TANGO agents, replaci
   - Review model docstrings for completeness
 
 - [ ] 6. Update agents with structured output
-  - [ ] 6.1 Update discovery_agent
-    - Import DiscoveryResult from agents.models
+  - [x] 6.1 Update discovery_agent
+    - Import DiscoveryResult and get_model_schema_description from agents.models
+    - Generate schema dynamically: `DISCOVERY_RESULT_SCHEMA = get_model_schema_description(DiscoveryResult)`
+    - Inject schema into system prompt using f-string
     - Add `structured_output_model=DiscoveryResult` to Agent initialization
     - Access structured output via `result.structured_output`
     - Return `model_dump_json()` for backward compatibility
-    - Update system prompt to reference model schema
     - Use `is_valid` property for validation logic
     - Add integration test
-    - _Requirements: Discovery agent structured output_
+    - _Requirements: Discovery agent structured output with dynamic schema_
   
-  - [ ] 6.2 Update documentation_agent
-    - Import DocumentationResult from agents.models
+  - [x] 6.2 Update documentation_agent
+    - Import DocumentationResult and get_model_schema_description from agents.models
+    - Generate schema dynamically: `DOCUMENTATION_RESULT_SCHEMA = get_model_schema_description(DocumentationResult)`
+    - Inject schema into system prompt using f-string
     - Add `structured_output_model=DocumentationResult` to Agent
     - Access via `result.structured_output`
     - Return `model_dump_json()` for backward compatibility
-    - Update system prompt with model documentation
     - Use `is_success` property for validation
     - Track workspace_initialized status correctly
     - Add integration test
-    - _Requirements: Documentation agent structured output_
+    - _Requirements: Documentation agent structured output with dynamic schema_
   
-  - [ ] 6.3 Update terraform_agent
-    - Import TerraformResult and TerraformLifecycleStep from agents.models
+  - [x] 6.3 Update terraform_agent
+    - Import TerraformResult, TerraformLifecycleStep, and get_model_schema_description from agents.models
+    - Generate schema dynamically: `TERRAFORM_RESULT_SCHEMA = get_model_schema_description(TerraformResult)`
+    - Inject schema into system prompt using f-string
     - Add `structured_output_model=TerraformResult` to Agent
     - Access via `result.structured_output`
     - Return `model_dump_json()` for backward compatibility
-    - Update system prompt with model documentation
     - Track each lifecycle step with TerraformLifecycleStep
     - Use `is_success` and `apply_succeeded` properties
     - Add integration test
-    - _Requirements: Terraform agent structured output_
+    - _Requirements: Terraform agent structured output with dynamic schema_
   
-  - [ ] 6.4 Update validation_agent
-    - Import ValidationResult from agents.models
+  - [x] 6.4 Update validation_agent
+    - Import ValidationResult and get_model_schema_description from agents.models
+    - Generate schema dynamically: `VALIDATION_RESULT_SCHEMA = get_model_schema_description(ValidationResult)`
+    - Inject schema into system prompt using f-string
     - Add `structured_output_model=ValidationResult` to Agent
     - Access via `result.structured_output`
     - Return `model_dump_json()` for backward compatibility
-    - Update system prompt with model documentation
     - Track terraform_steps as dict
     - Use `is_success` and `all_steps_passed` properties
     - Add integration test
-    - _Requirements: Validation agent structured output_
+    - _Requirements: Validation agent structured output with dynamic schema_
   
-  - [ ] 6.5 Update storage_agent
-    - Import StorageRequest and StorageResult from agents.models
+  - [x] 6.5 Update storage_agent
+    - Import StorageRequest, StorageResult, and get_model_schema_description from agents.models
+    - Generate schemas dynamically for both input and output models
+    - Inject schemas into system prompt using f-string
     - Add `structured_output_model=StorageResult` to Agent
     - Accept StorageRequest as input (parse from JSON)
     - Access via `result.structured_output`
     - Return `model_dump_json()` for backward compatibility
-    - Update system prompt with model documentation
     - Validate nested models (ValidationResult, TerraformResult)
     - Add integration test
-    - _Requirements: Storage agent structured output_
+    - _Requirements: Storage agent structured output with dynamic schema_
 
 - [ ] 7. Create agent integration tests
   - Create `tests/test_agent_integration.py`
@@ -160,11 +165,12 @@ This implementation adds Pydantic structured output to all TANGO agents, replaci
   - [ ] 9.2 Update system prompt with dynamic schemas
     - Import `get_all_agent_schemas` from agents.models
     - Use f-string to inject schemas into ORCHESTRATOR_SYSTEM_PROMPT
-    - Add DATA MODELS section with all model schemas
-    - Provide usage examples in prompt
-    - Verify prompt includes all model schemas
+    - Add DATA MODELS section with: `{get_all_agent_schemas()}`
+    - Provide usage examples in prompt showing how to parse each model
+    - Verify prompt includes all model schemas automatically
     - Test prompt updates when models change
-    - _Requirements: Orchestrator understands model structure_
+    - Document that schemas are generated dynamically (no manual updates needed)
+    - _Requirements: Orchestrator understands model structure via dynamic injection_
   
   - [ ] 9.3 Update discovery phase parsing
     - Parse discovery_agent output to DiscoveryResult using `model_validate_json()`
