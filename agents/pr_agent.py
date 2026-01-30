@@ -20,6 +20,21 @@ from agents.pr_tools import (
     git_commit_and_push,
     PRWorkspaceCleanup
 )
+from agents.pr_models import (
+    S3LinksInput,
+    FileContentInput,
+    PRContentInput,
+    PRStatusInput,
+    ResourceContentResult,
+    EligibleResourceResult,
+    RepoSetupResult,
+    FilePlacementResult,
+    ValidationCommandResult,
+    HashiCorpValidationResult,
+    GitHubPRResult,
+    PRStatusUpdateResult,
+    GitCommitPushResult
+)
 from agents.pr_exceptions import (
     PRAgentError,
     ConfigurationError,
@@ -72,7 +87,7 @@ def pr_agent(pr_request: str = "{}") -> str:
             logger.log_operation("Mode: Next eligible resource (atomic)", "info")
         
         # Step 1: Get resource to process
-        s3_links_json = None  # Will hold S3 links from get_next_eligible_resource
+        s3_links = None  # Will hold S3 links from get_next_eligible_resource
         
         with PRStepLogger(logger, 1, "Query for eligible resource", 
                          "Finding next resource ready for PR creation"):
@@ -87,9 +102,8 @@ def pr_agent(pr_request: str = "{}") -> str:
                 logger.log_operation("Querying DynamoDB for next eligible resource...", "progress")
                 
                 eligible_result = get_next_eligible_resource()
-                eligible_data = json.loads(eligible_result)
                 
-                resource_name = eligible_data.get('resource_name')
+                resource_name = eligible_result.resource_name
                 
                 if resource_name == "NONE":
                     logger.log_operation("No eligible resources found", "info")
@@ -105,16 +119,15 @@ def pr_agent(pr_request: str = "{}") -> str:
                     })
                 
                 if resource_name == "ERROR":
-                    error_msg = eligible_data.get('error', 'Unknown error')
+                    error_msg = eligible_result.error or 'Unknown error'
                     raise Exception(f"Failed to query eligible resources: {error_msg}")
                 
-                # Extract S3 links from eligible_data
-                s3_links = {
-                    's3_terraform_link': eligible_data.get('s3_terraform_link'),
-                    's3_template_link': eligible_data.get('s3_template_link'),
-                    's3_analysis_link': eligible_data.get('s3_analysis_link')
-                }
-                s3_links_json = json.dumps(s3_links)
+                # Extract S3 links from eligible_result
+                s3_links = S3LinksInput(
+                    s3_terraform_link=eligible_result.s3_terraform_link,
+                    s3_template_link=eligible_result.s3_template_link,
+                    s3_analysis_link=eligible_result.s3_analysis_link
+                )
                 
                 logger.log_operation(f"Found eligible resource: {resource_name}", "success")
                 logger.log_operation(f"S3 links retrieved from DynamoDB", "info")
@@ -129,10 +142,9 @@ def pr_agent(pr_request: str = "{}") -> str:
             # Retry S3 operations as they can be transient
             def fetch_content():
                 # Pass S3 links if available (from get_next_eligible_resource)
-                result = fetch_resource_content(resource_name, s3_links_json)
-                data = json.loads(result)
-                if data.get('status') == 'error':
-                    raise S3OperationError(data.get('error', 'Unknown S3 error'))
+                result = fetch_resource_content(resource_name, s3_links)
+                if result.status == 'error':
+                    raise S3OperationError(result.error or 'Unknown S3 error')
                 return result
             
             content_result, fetch_error = retry_with_backoff(
@@ -145,7 +157,6 @@ def pr_agent(pr_request: str = "{}") -> str:
             if fetch_error:
                 raise fetch_error
             
-            content_data = json.loads(content_result)
             logger.log_operation("Content fetched successfully", "success")
         
         # Step 3: Clone and setup repository
@@ -153,14 +164,13 @@ def pr_agent(pr_request: str = "{}") -> str:
                          "Cloning fork, syncing with upstream, creating branch"):
             
             repo_result = clone_and_setup_repo(resource_name)
-            repo_data = json.loads(repo_result)
             
-            if repo_data.get('status') == 'error':
-                raise Exception(f"Failed to setup repository: {repo_data.get('error')}")
+            if repo_result.status == 'error':
+                raise Exception(f"Failed to setup repository: {repo_result.error}")
             
-            repo_path = repo_data.get('repo_path')
-            branch_name = repo_data.get('branch_name')
-            work_dir_name = repo_data.get('work_dir_name')
+            repo_path = repo_result.repo_path
+            branch_name = repo_result.branch_name
+            work_dir_name = repo_result.work_dir_name
             
             logger.log_operation(f"Repository setup complete", "success", 
                                f"Path: {repo_path}\nBranch: {branch_name}")
@@ -174,18 +184,24 @@ def pr_agent(pr_request: str = "{}") -> str:
                 with PRStepLogger(logger, 4, "Place files in HashiCorp structure", 
                                  "Creating directories and placing Terraform files"):
                     
+                    # Create FileContentInput from content_result
+                    file_content = FileContentInput(
+                        terraform_code=content_result.terraform_code,
+                        template=content_result.template,
+                        service_name=content_result.service_name
+                    )
+                    
                     placement_result = place_files_in_structure(
                         repo_path,
                         resource_name,
-                        json.dumps(content_data)
+                        file_content
                     )
-                    placement_data = json.loads(placement_result)
                     
-                    if placement_data.get('status') == 'error':
-                        raise Exception(f"Failed to place files: {placement_data.get('error')}")
+                    if placement_result.status == 'error':
+                        raise Exception(f"Failed to place files: {placement_result.error}")
                     
                     # Track files created
-                    files_created = placement_data.get('files_created', [])
+                    files_created = placement_result.files_created
                     for file in files_created:
                         logger.add_file_created(file)
                     
@@ -198,15 +214,14 @@ def pr_agent(pr_request: str = "{}") -> str:
                     validation_start = time.time()
                     validation_result = run_hashicorp_validation(repo_path, resource_name)
                     validation_duration = time.time() - validation_start
-                    validation_data = json.loads(validation_result)
                     
-                    if validation_data.get('status') == 'error':
-                        raise Exception(f"HashiCorp validation failed: {validation_data.get('error')}")
+                    if validation_result.status == 'error':
+                        raise Exception(f"HashiCorp validation failed: {validation_result.error}")
                     
                     # Track validation results
-                    for cmd_result in validation_data.get('commands', []):
-                        cmd_name = cmd_result.get('command')
-                        cmd_success = cmd_result.get('success', False)
+                    for cmd_result in validation_result.commands:
+                        cmd_name = cmd_result.command
+                        cmd_success = cmd_result.success
                         logger.add_validation_result(cmd_name, cmd_success)
                     
                     logger.log_operation("Validation passed", "success", 
@@ -217,12 +232,11 @@ def pr_agent(pr_request: str = "{}") -> str:
                                  "Staging files, creating commit, pushing to fork"):
                     
                     commit_result = git_commit_and_push(repo_path, resource_name, branch_name)
-                    commit_data = json.loads(commit_result)
                     
-                    if commit_data.get('status') == 'error':
-                        raise Exception(f"Failed to commit and push: {commit_data.get('error')}")
+                    if commit_result.status == 'error':
+                        raise Exception(f"Failed to commit and push: {commit_result.error}")
                     
-                    commit_hash = commit_data.get('commit_hash')
+                    commit_hash = commit_result.commit_hash
                     logger.log_operation("Changes committed and pushed", "success", 
                                        f"Commit: {commit_hash[:8] if commit_hash else 'N/A'}")
                 
@@ -230,18 +244,26 @@ def pr_agent(pr_request: str = "{}") -> str:
                 with PRStepLogger(logger, 7, "Create GitHub pull request", 
                                  "Creating PR via GitHub API"):
                     
+                    # Create PRContentInput from content_result
+                    pr_content = PRContentInput(
+                        service_name=content_result.service_name,
+                        provider_version=content_result.provider_version,
+                        fetch_date=content_result.fetch_date,
+                        s3_analysis_link=content_result.s3_analysis_link,
+                        analysis_report=content_result.analysis_report
+                    )
+                    
                     pr_result = create_github_pr(
                         resource_name,
                         branch_name,
-                        json.dumps(content_data)
+                        pr_content
                     )
-                    pr_data = json.loads(pr_result)
                     
-                    if pr_data.get('status') == 'error':
-                        raise Exception(f"Failed to create PR: {pr_data.get('error')}")
+                    if pr_result.status == 'error':
+                        raise Exception(f"Failed to create PR: {pr_result.error}")
                     
-                    pr_url = pr_data.get('pr_url')
-                    pr_number = pr_data.get('pr_number')
+                    pr_url = pr_result.pr_url
+                    pr_number = pr_result.pr_number
                     
                     logger.log_operation("Pull request created", "success", 
                                        f"PR #{pr_number}: {pr_url}")
@@ -250,12 +272,18 @@ def pr_agent(pr_request: str = "{}") -> str:
                 with PRStepLogger(logger, 8, "Update DynamoDB status", 
                                  "Recording PR creation in database"):
                     
-                    status_result = update_pr_status(resource_name, pr_url, 'created')
-                    status_data = json.loads(status_result)
+                    # Create PRStatusInput
+                    pr_status_input = PRStatusInput(
+                        resource_name=resource_name,
+                        pr_url=pr_url,
+                        status='created'
+                    )
                     
-                    if status_data.get('status') == 'error':
+                    status_result = update_pr_status(pr_status_input)
+                    
+                    if status_result.status == 'error':
                         logger.log_operation(
-                            f"Warning: Failed to update DynamoDB: {status_data.get('error')}", 
+                            f"Warning: Failed to update DynamoDB: {status_result.error}", 
                             "warning"
                         )
                         logger.log_operation("PR was created successfully, but status update failed", "warning")
@@ -267,7 +295,7 @@ def pr_agent(pr_request: str = "{}") -> str:
                     pr_url=pr_url,
                     pr_number=pr_number,
                     branch_name=branch_name,
-                    commit_hash=commit_data.get('commit_hash_short')
+                    commit_hash=commit_result.commit_hash_short
                 )
                 
                 result = {
@@ -276,8 +304,8 @@ def pr_agent(pr_request: str = "{}") -> str:
                     "pr_url": pr_url,
                     "pr_number": pr_number,
                     "branch_name": branch_name,
-                    "commit_hash": commit_data.get('commit_hash_short'),
-                    "files_created": placement_data.get('files_created', []),
+                    "commit_hash": commit_result.commit_hash_short,
+                    "files_created": placement_result.files_created,
                     "message": f"Successfully created PR for {resource_name}"
                 }
                 
@@ -289,11 +317,15 @@ def pr_agent(pr_request: str = "{}") -> str:
             logger.log_operation("Updating DynamoDB with failed status...", "progress")
             
             try:
-                status_result = update_pr_status(resource_name, None, 'failed')
-                status_data = json.loads(status_result)
+                pr_status_input = PRStatusInput(
+                    resource_name=resource_name,
+                    pr_url=None,
+                    status='failed'
+                )
+                status_result = update_pr_status(pr_status_input)
                 
-                if status_data.get('status') == 'error':
-                    logger.log_operation(f"Failed to update DynamoDB: {status_data.get('error')}", "warning")
+                if status_result.status == 'error':
+                    logger.log_operation(f"Failed to update DynamoDB: {status_result.error}", "warning")
                 else:
                     logger.log_operation("DynamoDB updated with failed status", "success")
             except Exception as status_error:
@@ -352,7 +384,12 @@ def pr_agent(pr_request: str = "{}") -> str:
         # Update DynamoDB with failed status if we have a resource name
         if resource_name:
             try:
-                update_pr_status(resource_name, None, 'failed')
+                pr_status_input = PRStatusInput(
+                    resource_name=resource_name,
+                    pr_url=None,
+                    status='failed'
+                )
+                update_pr_status(pr_status_input)
             except Exception:
                 pass  # Ignore DynamoDB update errors here
         
@@ -377,7 +414,12 @@ def pr_agent(pr_request: str = "{}") -> str:
         # Update DynamoDB with failed status if we have a resource name
         if resource_name:
             try:
-                update_pr_status(resource_name, None, 'failed')
+                pr_status_input = PRStatusInput(
+                    resource_name=resource_name,
+                    pr_url=None,
+                    status='failed'
+                )
+                update_pr_status(pr_status_input)
             except Exception:
                 pass  # Ignore DynamoDB update errors here
         
@@ -398,7 +440,12 @@ def pr_agent(pr_request: str = "{}") -> str:
         # Update DynamoDB with failed status if we have a resource name
         if resource_name:
             try:
-                update_pr_status(resource_name, None, 'failed')
+                pr_status_input = PRStatusInput(
+                    resource_name=resource_name,
+                    pr_url=None,
+                    status='failed'
+                )
+                update_pr_status(pr_status_input)
             except Exception:
                 pass  # Ignore DynamoDB update errors here
         
@@ -417,7 +464,12 @@ def pr_agent(pr_request: str = "{}") -> str:
         # Update DynamoDB with failed status if we have a resource name
         if resource_name:
             try:
-                update_pr_status(resource_name, None, 'failed')
+                pr_status_input = PRStatusInput(
+                    resource_name=resource_name,
+                    pr_url=None,
+                    status='failed'
+                )
+                update_pr_status(pr_status_input)
             except Exception:
                 pass  # Ignore DynamoDB update errors here
         
@@ -436,7 +488,12 @@ def pr_agent(pr_request: str = "{}") -> str:
         # Update DynamoDB with failed status if we have a resource name
         if resource_name:
             try:
-                update_pr_status(resource_name, None, 'failed')
+                pr_status_input = PRStatusInput(
+                    resource_name=resource_name,
+                    pr_url=None,
+                    status='failed'
+                )
+                update_pr_status(pr_status_input)
             except Exception:
                 pass  # Ignore DynamoDB update errors here
         

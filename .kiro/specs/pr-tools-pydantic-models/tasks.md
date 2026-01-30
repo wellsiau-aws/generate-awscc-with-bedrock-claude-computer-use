@@ -368,26 +368,26 @@ This plan implements Pydantic data models for all function interactions in `agen
     - Test error cases return GitCommitPushResult with error
     - _Requirements: 13.2, 13.6_
 
-- [ ] 13. Checkpoint - Verify all tools are updated
+- [ ]* 13. Checkpoint - Verify all tools are updated
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 14. Update pr_agent.py to use models
-  - [ ] 14.1 Update imports to include all PR models
+- [x] 14. Update pr_agent.py to use models
+  - [x] 14.1 Update imports to include all PR models
     - Import all input and output models from agents.pr_models
     - _Requirements: 14.1_
   
-  - [ ] 14.2 Update tool calls to construct input models
+  - [x] 14.2 Update tool calls to construct input models
     - Replace JSON string construction with model instantiation
     - Pass model instances to tools instead of JSON strings
     - _Requirements: 14.1, 14.2_
   
-  - [ ] 14.3 Update result handling to use model properties
+  - [x] 14.3 Update result handling to use model properties
     - Replace json.loads() calls with direct model access
     - Use computed properties (is_success, is_valid) for condition checking
     - Use direct field access instead of dict.get()
     - _Requirements: 14.2, 14.3, 14.4, 14.5_
   
-  - [ ] 14.4 Update error handling to use model error fields
+  - [x] 14.4 Update error handling to use model error fields
     - Access error field directly from result models
     - Use is_success property for success checking
     - _Requirements: 14.3, 14.4_
