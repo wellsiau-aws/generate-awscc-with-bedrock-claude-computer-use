@@ -343,6 +343,8 @@ def pr_agent(pr_request: str = "{}") -> str:
             logger.log_operation("Mode: Next eligible resource (atomic)", "info")
         
         # Step 1: Get resource to process
+        s3_links_json = None  # Will hold S3 links from get_next_eligible_resource
+        
         with PRStepLogger(logger, 1, "Query for eligible resource", 
                          "Finding next resource ready for PR creation"):
             
@@ -350,6 +352,7 @@ def pr_agent(pr_request: str = "{}") -> str:
                 # Use the specified resource
                 resource_name = specific_resource
                 logger.log_operation(f"Using specified resource: {resource_name}", "success")
+                # Note: When using specific resource, S3 links will be constructed from conventions
             else:
                 # Query for next eligible resource
                 logger.log_operation("Querying DynamoDB for next eligible resource...", "progress")
@@ -376,7 +379,16 @@ def pr_agent(pr_request: str = "{}") -> str:
                     error_msg = eligible_data.get('error', 'Unknown error')
                     raise Exception(f"Failed to query eligible resources: {error_msg}")
                 
+                # Extract S3 links from eligible_data
+                s3_links = {
+                    's3_terraform_link': eligible_data.get('s3_terraform_link'),
+                    's3_template_link': eligible_data.get('s3_template_link'),
+                    's3_analysis_link': eligible_data.get('s3_analysis_link')
+                }
+                s3_links_json = json.dumps(s3_links)
+                
                 logger.log_operation(f"Found eligible resource: {resource_name}", "success")
+                logger.log_operation(f"S3 links retrieved from DynamoDB", "info")
             
             # Update logger with resource name
             logger.resource_name = resource_name
@@ -387,7 +399,8 @@ def pr_agent(pr_request: str = "{}") -> str:
             
             # Retry S3 operations as they can be transient
             def fetch_content():
-                result = fetch_resource_content(resource_name)
+                # Pass S3 links if available (from get_next_eligible_resource)
+                result = fetch_resource_content(resource_name, s3_links_json)
                 data = json.loads(result)
                 if data.get('status') == 'error':
                     raise S3OperationError(data.get('error', 'Unknown S3 error'))
@@ -705,25 +718,6 @@ def pr_agent(pr_request: str = "{}") -> str:
             "exit_code": 99,
             "resource_name": resource_name
         })
-
-
-# Create the agent instance with all tools
-pr_agent_instance = Agent(
-    name="PR Agent",
-    system_prompt=PR_SYSTEM_PROMPT,
-    tools=[
-        get_next_eligible_resource,
-        fetch_resource_content,
-        clone_and_setup_repo,
-        place_files_in_structure,
-        run_hashicorp_validation,
-        git_commit_and_push,
-        create_github_pr,
-        update_pr_status,
-        python_repl,
-        use_aws
-    ]
-)
 
 
 if __name__ == "__main__":

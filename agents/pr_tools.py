@@ -14,12 +14,14 @@ import config
 
 
 @tool
-def fetch_resource_content(resource_name: str) -> str:
+def fetch_resource_content(resource_name: str, s3_links_json: str = None) -> str:
     """
     Fetch all required content from S3 for a resource.
     
     Args:
         resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
+        s3_links_json: Optional JSON string with S3 links from get_next_eligible_resource
+                      Format: {"s3_terraform_link": "...", "s3_template_link": "...", "s3_analysis_link": "..."}
     
     Returns:
         JSON with terraform_code, template, analysis_report, and metadata
@@ -39,31 +41,54 @@ def fetch_resource_content(resource_name: str) -> str:
         
         print(f"   Service name: {service_name}")
         
-        # Construct S3 paths
-        terraform_key = f"examples/resources/{resource_name}/{service_name}.tf"
-        template_key = f"templates/resources/{service_name}.md.tmpl"
-        
-        # Find the latest analysis file
-        analysis_prefix = f"analysis/resource/{resource_name}/"
-        print(f"\n📂 Listing analysis files in {analysis_prefix}...")
-        
-        analysis_response = s3.list_objects_v2(
-            Bucket=config.S3_BUCKET,
-            Prefix=analysis_prefix
-        )
-        
-        analysis_key = None
-        if 'Contents' in analysis_response and analysis_response['Contents']:
-            # Sort by LastModified to get the latest
-            analysis_files = sorted(
-                analysis_response['Contents'],
-                key=lambda x: x['LastModified'],
-                reverse=True
-            )
-            analysis_key = analysis_files[0]['Key']
-            print(f"   Found latest analysis: {analysis_key}")
+        # Determine S3 paths - use provided links if available, otherwise construct from conventions
+        if s3_links_json:
+            # Use S3 links from get_next_eligible_resource (preferred method)
+            print(f"\n📋 Using S3 links from get_next_eligible_resource")
+            
+            s3_links = json.loads(s3_links_json)
+            terraform_key = s3_links.get('s3_terraform_link')
+            template_key = s3_links.get('s3_template_link')
+            analysis_key = s3_links.get('s3_analysis_link')
+            
+            # Validate required links are present
+            if not terraform_key:
+                raise ValueError("s3_terraform_link is required in s3_links_json")
+            if not template_key:
+                raise ValueError("s3_template_link is required in s3_links_json")
+            
+            print(f"   Terraform: {terraform_key}")
+            print(f"   Template: {template_key}")
+            print(f"   Analysis: {analysis_key if analysis_key else 'N/A'}")
+            
         else:
-            print(f"   ⚠️  No analysis files found")
+            # Legacy mode: Construct S3 paths from naming conventions
+            print(f"\n📋 Constructing S3 paths using naming conventions (legacy mode)")
+            
+            terraform_key = f"examples/resources/{resource_name}/{service_name}.tf"
+            template_key = f"templates/resources/{service_name}.md.tmpl"
+            
+            # Find the latest analysis file
+            analysis_prefix = f"analysis/resource/{resource_name}/"
+            print(f"\n📂 Listing analysis files in {analysis_prefix}...")
+            
+            analysis_response = s3.list_objects_v2(
+                Bucket=config.S3_BUCKET,
+                Prefix=analysis_prefix
+            )
+            
+            analysis_key = None
+            if 'Contents' in analysis_response and analysis_response['Contents']:
+                # Sort by LastModified to get the latest
+                analysis_files = sorted(
+                    analysis_response['Contents'],
+                    key=lambda x: x['LastModified'],
+                    reverse=True
+                )
+                analysis_key = analysis_files[0]['Key']
+                print(f"   Found latest analysis: {analysis_key}")
+            else:
+                print(f"   ⚠️  No analysis files found")
         
         # Fetch terraform code
         print(f"\n📄 Fetching Terraform code from {terraform_key}...")
