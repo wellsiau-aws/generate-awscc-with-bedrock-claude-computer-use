@@ -9,22 +9,40 @@ import shutil
 import tempfile
 import boto3
 from datetime import datetime
+from typing import Optional
 from strands import tool
 import config
+from agents.pr_models import (
+    S3LinksInput,
+    ResourceContentResult,
+    EligibleResourceResult,
+    RepoSetupResult,
+    FileContentInput,
+    FilePlacementResult,
+    ValidationCommandResult,
+    HashiCorpValidationResult,
+    PRContentInput,
+    GitHubPRResult,
+    PRStatusInput,
+    PRStatusUpdateResult,
+    GitCommitPushResult
+)
 
 
 @tool
-def fetch_resource_content(resource_name: str, s3_links_json: str = None) -> str:
+def fetch_resource_content(
+    resource_name: str,
+    s3_links: Optional[S3LinksInput] = None
+) -> ResourceContentResult:
     """
     Fetch all required content from S3 for a resource.
     
     Args:
         resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
-        s3_links_json: Optional JSON string with S3 links from get_next_eligible_resource
-                      Format: {"s3_terraform_link": "...", "s3_template_link": "...", "s3_analysis_link": "..."}
+        s3_links: Optional S3LinksInput model with S3 links from get_next_eligible_resource
     
     Returns:
-        JSON with terraform_code, template, analysis_report, and metadata
+        ResourceContentResult with terraform_code, template, analysis_report, and metadata
     """
     print("\n" + "="*80)
     print(f"📥 FETCHING S3 CONTENT - {resource_name}")
@@ -42,20 +60,13 @@ def fetch_resource_content(resource_name: str, s3_links_json: str = None) -> str
         print(f"   Service name: {service_name}")
         
         # Determine S3 paths - use provided links if available, otherwise construct from conventions
-        if s3_links_json:
+        if s3_links:
             # Use S3 links from get_next_eligible_resource (preferred method)
             print(f"\n📋 Using S3 links from get_next_eligible_resource")
             
-            s3_links = json.loads(s3_links_json)
-            terraform_key = s3_links.get('s3_terraform_link')
-            template_key = s3_links.get('s3_template_link')
-            analysis_key = s3_links.get('s3_analysis_link')
-            
-            # Validate required links are present
-            if not terraform_key:
-                raise ValueError("s3_terraform_link is required in s3_links_json")
-            if not template_key:
-                raise ValueError("s3_template_link is required in s3_links_json")
+            terraform_key = s3_links.s3_terraform_link
+            template_key = s3_links.s3_template_link
+            analysis_key = s3_links.s3_analysis_link
             
             print(f"   Terraform: {terraform_key}")
             print(f"   Template: {template_key}")
@@ -158,18 +169,19 @@ def fetch_resource_content(resource_name: str, s3_links_json: str = None) -> str
                 raise ValueError(f"Analysis file is not valid UTF-8: {analysis_key}")
         
         # Build result
-        result = {
-            "resource_name": resource_name,
-            "service_name": service_name,
-            "terraform_code": terraform_code,
-            "template": template,
-            "analysis_report": analysis_report,
-            "s3_terraform_link": terraform_key,
-            "s3_template_link": template_key,
-            "s3_analysis_link": analysis_key,
-            "provider_version": config.DEFAULT_PROVIDER_VERSION,
-            "fetch_date": datetime.now().strftime("%Y-%m-%d")
-        }
+        result = ResourceContentResult(
+            status="success",
+            resource_name=resource_name,
+            service_name=service_name,
+            terraform_code=terraform_code,
+            template=template,
+            analysis_report=analysis_report,
+            s3_terraform_link=terraform_key,
+            s3_template_link=template_key,
+            s3_analysis_link=analysis_key,
+            provider_version=config.DEFAULT_PROVIDER_VERSION,
+            fetch_date=datetime.now().strftime("%Y-%m-%d")
+        )
         
         print("\n" + "-"*80)
         print("✅ FETCH COMPLETED")
@@ -180,38 +192,60 @@ def fetch_resource_content(resource_name: str, s3_links_json: str = None) -> str
         print(f"   Analysis: {len(analysis_report) if analysis_report else 0} bytes")
         print("="*80 + "\n")
         
-        return json.dumps(result)
+        return result
     
     except FileNotFoundError as e:
         print("\n" + "-"*80)
         print("❌ FETCH FAILED - File not found")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        raise
+        return ResourceContentResult(
+            status="error",
+            resource_name=resource_name,
+            service_name=resource_name[6:] if resource_name.startswith('awscc_') else resource_name,
+            provider_version=config.DEFAULT_PROVIDER_VERSION,
+            fetch_date=datetime.now().strftime("%Y-%m-%d"),
+            error=str(e)
+        )
     
     except ValueError as e:
         print("\n" + "-"*80)
         print("❌ FETCH FAILED - Content validation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        raise
+        return ResourceContentResult(
+            status="error",
+            resource_name=resource_name,
+            service_name=resource_name[6:] if resource_name.startswith('awscc_') else resource_name,
+            provider_version=config.DEFAULT_PROVIDER_VERSION,
+            fetch_date=datetime.now().strftime("%Y-%m-%d"),
+            error=str(e)
+        )
     
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ FETCH FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        raise
+        return ResourceContentResult(
+            status="error",
+            resource_name=resource_name,
+            service_name=resource_name[6:] if resource_name.startswith('awscc_') else resource_name,
+            provider_version=config.DEFAULT_PROVIDER_VERSION,
+            fetch_date=datetime.now().strftime("%Y-%m-%d"),
+            error=str(e)
+        )
 
 
 @tool
-def get_next_eligible_resource() -> str:
+def get_next_eligible_resource() -> EligibleResourceResult:
     """
     Get the next single resource eligible for PR creation (atomic operation).
     
     Returns:
-        JSON with one resource (source='tango_pipeline', status='success', no PR)
-        or {"resource_name": "NONE"} if no eligible resources
+        EligibleResourceResult with resource details and S3 links,
+        or resource_name="NONE" if no eligible resources,
+        or resource_name="ERROR" if an error occurred
     """
     print("\n" + "="*80)
     print("🔍 QUERYING DYNAMODB - Getting next eligible resource")
@@ -341,13 +375,19 @@ def get_next_eligible_resource() -> str:
             print(f"   Total eligible: {len(eligible_resources)}")
             print("="*80 + "\n")
             
-            return json.dumps(selected)
+            return EligibleResourceResult(
+                resource_name=selected['resource_name'],
+                timestamp=selected['timestamp'],
+                s3_terraform_link=selected['s3_terraform_link'],
+                s3_template_link=selected['s3_template_link'],
+                s3_analysis_link=selected['s3_analysis_link']
+            )
         else:
             print("\n" + "-"*80)
             print("ℹ️  QUERY COMPLETED - No eligible resources found")
             print("="*80 + "\n")
             
-            return json.dumps({"resource_name": "NONE"})
+            return EligibleResourceResult(resource_name="NONE")
     
     except Exception as e:
         print("\n" + "-"*80)
@@ -355,11 +395,14 @@ def get_next_eligible_resource() -> str:
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
         
-        return json.dumps({"resource_name": "ERROR", "error": str(e)})
+        return EligibleResourceResult(
+            resource_name="ERROR",
+            error=str(e)
+        )
 
 
 @tool
-def clone_and_setup_repo(resource_name: str) -> str:
+def clone_and_setup_repo(resource_name: str) -> RepoSetupResult:
     """
     Clone fork, create branch, and prepare for changes.
     
@@ -367,7 +410,7 @@ def clone_and_setup_repo(resource_name: str) -> str:
         resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
     
     Returns:
-        JSON with repo_path, branch_name, and status
+        RepoSetupResult with repo_path, branch_name, work_dir_name, and status
     """
     print("\n" + "="*80)
     print(f"🔧 GIT OPERATIONS - Setting up repository for {resource_name}")
@@ -379,7 +422,7 @@ def clone_and_setup_repo(resource_name: str) -> str:
     except ImportError:
         error_msg = "GitPython not installed. Run: pip install GitPython>=3.1.40"
         print(f"\n❌ ERROR: {error_msg}")
-        return json.dumps({"status": "error", "error": error_msg})
+        return RepoSetupResult(status="error", error=error_msg)
     
     try:
         # Validate configuration
@@ -487,12 +530,12 @@ def clone_and_setup_repo(resource_name: str) -> str:
             print(f"   Error: {str(e)}")
             raise
         
-        result = {
-            "status": "success",
-            "repo_path": work_dir,
-            "branch_name": branch_name,
-            "work_dir_name": work_dir_name
-        }
+        result = RepoSetupResult(
+            status="success",
+            repo_path=work_dir,
+            branch_name=branch_name,
+            work_dir_name=work_dir_name
+        )
         
         print("\n" + "-"*80)
         print("✅ GIT SETUP COMPLETED")
@@ -501,60 +544,52 @@ def clone_and_setup_repo(resource_name: str) -> str:
         print(f"   User: {config.GIT_USER_NAME} <{config.GIT_USER_EMAIL}>")
         print("="*80 + "\n")
         
-        return json.dumps(result)
+        return result
     
     except ValueError as e:
         print("\n" + "-"*80)
         print("❌ GIT SETUP FAILED - Configuration error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return RepoSetupResult(status="error", error=str(e))
     
     except git.exc.GitCommandError as e:
         print("\n" + "-"*80)
         print("❌ GIT SETUP FAILED - Git operation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": f"Git operation failed: {str(e)}"})
+        return RepoSetupResult(status="error", error=f"Git operation failed: {str(e)}")
     
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ GIT SETUP FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return RepoSetupResult(status="error", error=str(e))
 
 
 @tool
-def place_files_in_structure(repo_path: str, resource_name: str, content_json: str) -> str:
+def place_files_in_structure(repo_path: str, resource_name: str, content: FileContentInput) -> FilePlacementResult:
     """
     Place files in correct HashiCorp repository structure.
     
     Args:
         repo_path: Path to the cloned repository
         resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
-        content_json: JSON string with terraform_code, template, and service_name
+        content: FileContentInput model with terraform_code, template, and service_name
     
     Returns:
-        JSON with list of files created and validation status
+        FilePlacementResult with list of files created and validation status
     """
     print("\n" + "="*80)
     print(f"📁 FILE PLACEMENT - Placing files for {resource_name}")
     print("="*80)
     
     try:
-        # Parse content JSON
-        content = json.loads(content_json)
-        terraform_code = content.get('terraform_code')
-        template = content.get('template')
-        service_name = content.get('service_name')
-        
-        if not terraform_code:
-            raise ValueError("terraform_code is required in content")
-        if not template:
-            raise ValueError("template is required in content")
-        if not service_name:
-            raise ValueError("service_name is required in content")
+        # Access fields directly from content model
+        terraform_code = content.terraform_code
+        template = content.template
+        service_name = content.service_name
         
         print(f"   Resource: {resource_name}")
         print(f"   Service: {service_name}")
@@ -634,13 +669,13 @@ def place_files_in_structure(repo_path: str, resource_name: str, content_json: s
         
         print(f"   ✓ All files validated successfully")
         
-        result = {
-            "status": "success",
-            "files_created": files_created,
-            "resource_name": resource_name,
-            "service_name": service_name,
-            "validation": "passed"
-        }
+        result = FilePlacementResult(
+            status="success",
+            files_created=files_created,
+            resource_name=resource_name,
+            service_name=service_name,
+            validation="passed"
+        )
         
         print("\n" + "-"*80)
         print("✅ FILE PLACEMENT COMPLETED")
@@ -649,39 +684,41 @@ def place_files_in_structure(repo_path: str, resource_name: str, content_json: s
             print(f"      - {file}")
         print("="*80 + "\n")
         
-        return json.dumps(result)
-    
-    except json.JSONDecodeError as e:
-        print("\n" + "-"*80)
-        print("❌ FILE PLACEMENT FAILED - Invalid JSON")
-        print(f"   Error: {str(e)}")
-        print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": f"Invalid JSON: {str(e)}"})
+        return result
     
     except ValueError as e:
         print("\n" + "-"*80)
-        print("❌ FILE PLACEMENT FAILED - Missing required content")
+        print("❌ FILE PLACEMENT FAILED - Validation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return FilePlacementResult(
+            status="error",
+            error=str(e)
+        )
     
     except OSError as e:
         print("\n" + "-"*80)
         print("❌ FILE PLACEMENT FAILED - File system error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": f"File system error: {str(e)}"})
+        return FilePlacementResult(
+            status="error",
+            error=f"File system error: {str(e)}"
+        )
     
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ FILE PLACEMENT FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return FilePlacementResult(
+            status="error",
+            error=str(e)
+        )
 
 
 @tool
-def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
+def run_hashicorp_validation(repo_path: str, resource_name: str) -> HashiCorpValidationResult:
     """
     Run required make commands for HashiCorp validation.
     
@@ -690,7 +727,7 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
     
     Returns:
-        JSON with command results, stdout/stderr, and validation status
+        HashiCorpValidationResult with command results, stdout/stderr, and validation status
     """
     print("\n" + "="*80)
     print(f"🔨 HASHICORP VALIDATION - Running make commands for {resource_name}")
@@ -701,11 +738,8 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
     try:
         print(f"   Repository: {repo_path}")
         
-        results = {
-            "status": "success",
-            "resource_name": resource_name,
-            "commands": []
-        }
+        # Initialize list to collect ValidationCommandResult objects
+        commands = []
 
         # Extract service_name from resource_name (remove "awscc_" prefix)
         if resource_name.startswith('awscc_'):
@@ -734,13 +768,14 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             
             tools_success = tools_result.returncode == 0
             
-            results["commands"].append({
-                "command": "make tools",
-                "returncode": tools_result.returncode,
-                "success": tools_success,
-                "stdout": tools_result.stdout,
-                "stderr": tools_result.stderr
-            })
+            # Create ValidationCommandResult instance
+            commands.append(ValidationCommandResult(
+                command="make tools",
+                returncode=tools_result.returncode,
+                success=tools_success,
+                stdout=tools_result.stdout,
+                stderr=tools_result.stderr
+            ))
             
             if tools_success:
                 print(f"   ✓ make tools completed successfully")
@@ -767,14 +802,17 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         except subprocess.TimeoutExpired:
             error_msg = "make tools command timed out after 10 minutes"
             print(f"   ❌ {error_msg}")
-            results["commands"].append({
-                "command": "make tools",
-                "success": False,
-                "error": error_msg
-            })
-            results["status"] = "error"
-            results["error"] = error_msg
-            return json.dumps(results)
+            commands.append(ValidationCommandResult(
+                command="make tools",
+                success=False,
+                error=error_msg
+            ))
+            return HashiCorpValidationResult(
+                status="error",
+                resource_name=resource_name,
+                commands=commands,
+                error=error_msg
+            )
         
         # Run 'make docs' command (auto-generates docs from templates)
         print(f"\n📚 Running 'make docs' (generating documentation)...")
@@ -790,13 +828,14 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             
             docs_success = docs_result.returncode == 0
             
-            results["commands"].append({
-                "command": "make docs",
-                "returncode": docs_result.returncode,
-                "success": docs_success,
-                "stdout": docs_result.stdout,
-                "stderr": docs_result.stderr
-            })
+            # Create ValidationCommandResult instance
+            commands.append(ValidationCommandResult(
+                command="make docs",
+                returncode=docs_result.returncode,
+                success=docs_success,
+                stdout=docs_result.stdout,
+                stderr=docs_result.stderr
+            ))
             
             if docs_success:
                 print(f"   ✓ make docs completed successfully")
@@ -823,14 +862,17 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         except subprocess.TimeoutExpired:
             error_msg = "make docs command timed out after 10 minutes"
             print(f"   ❌ {error_msg}")
-            results["commands"].append({
-                "command": "make docs",
-                "success": False,
-                "error": error_msg
-            })
-            results["status"] = "error"
-            results["error"] = error_msg
-            return json.dumps(results)
+            commands.append(ValidationCommandResult(
+                command="make docs",
+                success=False,
+                error=error_msg
+            ))
+            return HashiCorpValidationResult(
+                status="error",
+                resource_name=resource_name,
+                commands=commands,
+                error=error_msg
+            )
         
         # Verify docs/resources/{service_name}.md was created by make docs
         docs_file_path = os.path.join(repo_path, 'docs', 'resources', f"{service_name}.md")
@@ -840,16 +882,19 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         if os.path.exists(docs_file_path):
             file_size = os.path.getsize(docs_file_path)
             print(f"   ✓ Documentation file exists ({file_size} bytes)")
-            results["docs_generated"] = True
-            results["docs_file_path"] = f"docs/resources/{service_name}.md"
-            results["docs_file_size"] = file_size
+            docs_generated = True
+            docs_file_path_str = f"docs/resources/{service_name}.md"
+            docs_file_size = file_size
         else:
             error_msg = f"Documentation file not generated: docs/resources/{service_name}.md"
             print(f"   ❌ {error_msg}")
-            results["docs_generated"] = False
-            results["status"] = "error"
-            results["error"] = error_msg
-            return json.dumps(results)
+            return HashiCorpValidationResult(
+                status="error",
+                resource_name=resource_name,
+                commands=commands,
+                docs_generated=False,
+                error=error_msg
+            )
         
         # Run additional validation commands if needed
         # Check if 'make validate' target exists
@@ -878,13 +923,14 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
                 
                 validate_success = validate_result.returncode == 0
                 
-                results["commands"].append({
-                    "command": "make validate",
-                    "returncode": validate_result.returncode,
-                    "success": validate_success,
-                    "stdout": validate_result.stdout,
-                    "stderr": validate_result.stderr
-                })
+                # Create ValidationCommandResult instance
+                commands.append(ValidationCommandResult(
+                    command="make validate",
+                    returncode=validate_result.returncode,
+                    success=validate_success,
+                    stdout=validate_result.stdout,
+                    stderr=validate_result.stderr
+                ))
                 
                 if validate_success:
                     print(f"   ✓ make validate completed successfully")
@@ -903,11 +949,18 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         print("\n" + "-"*80)
         print("✅ HASHICORP VALIDATION COMPLETED")
         print(f"   Resource: {resource_name}")
-        print(f"   Commands run: {len(results['commands'])}")
-        print(f"   Documentation generated: {results.get('docs_generated', False)}")
+        print(f"   Commands run: {len(commands)}")
+        print(f"   Documentation generated: {docs_generated}")
         print("="*80 + "\n")
         
-        return json.dumps(results)
+        return HashiCorpValidationResult(
+            status="success",
+            resource_name=resource_name,
+            commands=commands,
+            docs_generated=docs_generated,
+            docs_file_path=docs_file_path_str,
+            docs_file_size=docs_file_size
+        )
     
     except subprocess.CalledProcessError as e:
         # Command failed - provide detailed error information
@@ -923,16 +976,18 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
             print(f"   Stderr: {e.stderr[:500]}...")
         print("="*80 + "\n")
         
-        results["status"] = "error"
-        results["error"] = error_msg
-        results["error_details"] = {
-            "command": str(e.cmd),
-            "returncode": e.returncode,
-            "stdout": e.stdout,
-            "stderr": e.stderr
-        }
-        
-        return json.dumps(results)
+        return HashiCorpValidationResult(
+            status="error",
+            resource_name=resource_name,
+            commands=commands,
+            error=error_msg,
+            error_details={
+                "command": str(e.cmd),
+                "returncode": e.returncode,
+                "stdout": e.stdout,
+                "stderr": e.stderr
+            }
+        )
     
     except FileNotFoundError as e:
         # make command not found
@@ -943,10 +998,12 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         print(f"   Error: {error_msg}")
         print("="*80 + "\n")
         
-        results["status"] = "error"
-        results["error"] = error_msg
-        
-        return json.dumps(results)
+        return HashiCorpValidationResult(
+            status="error",
+            resource_name=resource_name,
+            commands=commands if 'commands' in locals() else [],
+            error=error_msg
+        )
     
     except Exception as e:
         # Unexpected error
@@ -957,25 +1014,27 @@ def run_hashicorp_validation(repo_path: str, resource_name: str) -> str:
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
         
-        results["status"] = "error"
-        results["error"] = error_msg
-        
-        return json.dumps(results)
+        return HashiCorpValidationResult(
+            status="error",
+            resource_name=resource_name,
+            commands=commands if 'commands' in locals() else [],
+            error=error_msg
+        )
 
 
 
 @tool
-def create_github_pr(resource_name: str, branch_name: str, content_json: str) -> str:
+def create_github_pr(resource_name: str, branch_name: str, content: PRContentInput) -> GitHubPRResult:
     """
     Create pull request via GitHub API.
     
     Args:
         resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
         branch_name: The branch name to create PR from (e.g., "d-awscc_s3_bucket")
-        content_json: JSON string with resource metadata (analysis_report, s3_analysis_link, etc.)
+        content: PRContentInput model with resource metadata (service_name, provider_version, etc.)
     
     Returns:
-        JSON with pr_url, pr_number, and status
+        GitHubPRResult with pr_url, pr_number, and status
     """
     print("\n" + "="*80)
     print(f"🔀 GITHUB PR CREATOR - Creating PR for {resource_name}")
@@ -986,7 +1045,7 @@ def create_github_pr(resource_name: str, branch_name: str, content_json: str) ->
     except ImportError:
         error_msg = "PyGithub not installed. Run: pip install PyGithub>=2.1.1"
         print(f"\n❌ ERROR: {error_msg}")
-        return json.dumps({"status": "error", "error": error_msg})
+        return GitHubPRResult(status="error", error=error_msg)
     
     try:
         # Validate configuration
@@ -994,9 +1053,6 @@ def create_github_pr(resource_name: str, branch_name: str, content_json: str) ->
             raise ValueError("GITHUB_TOKEN not configured")
         if not config.GITHUB_FORK_URL:
             raise ValueError("GITHUB_FORK_URL not configured")
-        
-        # Parse content JSON
-        content = json.loads(content_json)
         
         print(f"   Resource: {resource_name}")
         print(f"   Branch: {branch_name}")
@@ -1075,14 +1131,14 @@ def create_github_pr(resource_name: str, branch_name: str, content_json: str) ->
             print(f"   PR Number: #{pr.number}")
             print(f"   PR URL: {pr.html_url}")
             
-            result = {
-                "status": "success",
-                "pr_url": pr.html_url,
-                "pr_number": pr.number,
-                "pr_title": pr_title,
-                "resource_name": resource_name,
-                "branch_name": branch_name
-            }
+            result = GitHubPRResult(
+                status="success",
+                pr_url=pr.html_url,
+                pr_number=pr.number,
+                pr_title=pr_title,
+                resource_name=resource_name,
+                branch_name=branch_name
+            )
             
             print("\n" + "-"*80)
             print("✅ GITHUB PR CREATED")
@@ -1090,7 +1146,7 @@ def create_github_pr(resource_name: str, branch_name: str, content_json: str) ->
             print(f"   Title: {pr_title}")
             print("="*80 + "\n")
             
-            return json.dumps(result)
+            return result
         
         except GithubException as e:
             # Handle specific GitHub API errors
@@ -1117,44 +1173,47 @@ def create_github_pr(resource_name: str, branch_name: str, content_json: str) ->
             else:
                 raise ValueError(f"GitHub API error ({e.status}): {str(e)}")
     
-    except json.JSONDecodeError as e:
-        print("\n" + "-"*80)
-        print("❌ PR CREATION FAILED - Invalid JSON")
-        print(f"   Error: {str(e)}")
-        print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": f"Invalid JSON: {str(e)}"})
-    
     except ValueError as e:
         print("\n" + "-"*80)
         print("❌ PR CREATION FAILED - Configuration or validation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return GitHubPRResult(
+            status="error",
+            resource_name=resource_name,
+            branch_name=branch_name,
+            error=str(e)
+        )
     
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ PR CREATION FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return GitHubPRResult(
+            status="error",
+            resource_name=resource_name,
+            branch_name=branch_name,
+            error=str(e)
+        )
 
 
-def _generate_pr_description(resource_name: str, content: dict) -> str:
+def _generate_pr_description(resource_name: str, content: PRContentInput) -> str:
     """
     Generate PR description from template.
     
     Args:
         resource_name: The AWSCC resource name
-        content: Dictionary with resource metadata
+        content: PRContentInput model with resource metadata
     
     Returns:
         Formatted PR description string
     """
-    # Extract metadata from content
-    service_name = content.get('service_name', resource_name.replace('awscc_', ''))
-    provider_version = content.get('provider_version', config.DEFAULT_PROVIDER_VERSION)
-    validation_date = content.get('fetch_date', datetime.now().strftime("%Y-%m-%d"))
-    s3_analysis_link = content.get('s3_analysis_link', '')
+    # Extract metadata from content model
+    service_name = content.service_name
+    provider_version = content.provider_version
+    validation_date = content.fetch_date
+    s3_analysis_link = content.s3_analysis_link
     
     # Fetch analysis content from S3
     analysis_content = ""
@@ -1225,26 +1284,25 @@ This PR adds a validated Terraform example for `{resource_name}`.
 
 
 @tool
-def update_pr_status(resource_name: str, pr_url: str, status: str) -> str:
+def update_pr_status(input: PRStatusInput) -> PRStatusUpdateResult:
     """
     Update DynamoDB with PR creation status.
     
     Args:
-        resource_name: The AWSCC resource name (e.g., "awscc_s3_bucket")
-        pr_url: The GitHub PR URL (or None if PR creation failed)
-        status: PR status - 'created' or 'failed'
+        input: PRStatusInput model with resource_name, pr_url, and status
     
     Returns:
-        JSON with confirmation message and update details
+        PRStatusUpdateResult with confirmation message and update details
     """
     print("\n" + "="*80)
-    print(f"💾 DYNAMODB STATUS UPDATER - Updating PR status for {resource_name}")
+    print(f"💾 DYNAMODB STATUS UPDATER - Updating PR status for {input.resource_name}")
     print("="*80)
     
     try:
-        # Validate status parameter
-        if status not in ['created', 'failed']:
-            raise ValueError(f"Invalid status: {status}. Must be 'created' or 'failed'")
+        # Access fields directly from input model (Pydantic handles validation)
+        resource_name = input.resource_name
+        pr_url = input.pr_url
+        status = input.status
         
         print(f"   Resource: {resource_name}")
         print(f"   Status: {status}")
@@ -1354,18 +1412,16 @@ def update_pr_status(resource_name: str, pr_url: str, status: str) -> str:
             
             print(f"   ✓ Update verified successfully")
             
-            # Build result
-            result = {
-                "status": "success",
-                "resource_name": resource_name,
-                "timestamp": int(timestamp),
-                "pr_status": updated_pr_status,
-                "pr_created_at": updated_pr_created_at,
-                "message": f"Successfully updated PR status to '{status}' for {resource_name}"
-            }
-            
-            if updated_pr_url:
-                result["github_pr_url"] = updated_pr_url
+            # Build result using PRStatusUpdateResult
+            result = PRStatusUpdateResult(
+                status="success",
+                resource_name=resource_name,
+                timestamp=int(timestamp),
+                pr_status=updated_pr_status,
+                pr_created_at=updated_pr_created_at,
+                github_pr_url=updated_pr_url,
+                message=f"Successfully updated PR status to '{status}' for {resource_name}"
+            )
             
             print("\n" + "-"*80)
             print("✅ DYNAMODB UPDATE COMPLETED")
@@ -1374,7 +1430,7 @@ def update_pr_status(resource_name: str, pr_url: str, status: str) -> str:
             print(f"   Timestamp: {timestamp}")
             print("="*80 + "\n")
             
-            return json.dumps(result)
+            return result
         
         except Exception as e:
             raise ValueError(f"Failed to update DynamoDB: {str(e)}")
@@ -1385,11 +1441,11 @@ def update_pr_status(resource_name: str, pr_url: str, status: str) -> str:
         print("❌ DYNAMODB UPDATE FAILED - Validation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({
-            "status": "error",
-            "error": str(e),
-            "resource_name": resource_name
-        })
+        return PRStatusUpdateResult(
+            status="error",
+            resource_name=input.resource_name,
+            error=str(e)
+        )
     
     except Exception as e:
         # Unexpected error
@@ -1398,17 +1454,16 @@ def update_pr_status(resource_name: str, pr_url: str, status: str) -> str:
         print(f"   Error: {str(e)}")
         print(f"   Type: {type(e).__name__}")
         print("="*80 + "\n")
-        return json.dumps({
-            "status": "error",
-            "error": f"Unexpected error: {str(e)}",
-            "error_type": type(e).__name__,
-            "resource_name": resource_name
-        })
+        return PRStatusUpdateResult(
+            status="error",
+            resource_name=input.resource_name,
+            error=f"Unexpected error: {str(e)}"
+        )
 
 
 
 @tool
-def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) -> str:
+def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) -> GitCommitPushResult:
     """
     Commit changes and push to fork remote.
     
@@ -1418,7 +1473,7 @@ def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) ->
         branch_name: The branch name to push (e.g., "d-awscc_s3_bucket")
     
     Returns:
-        JSON with commit hash, push status, and details
+        GitCommitPushResult with commit hash, push status, and details
     """
     print("\n" + "="*80)
     print(f"📤 GIT COMMIT AND PUSH - Committing changes for {resource_name}")
@@ -1430,7 +1485,7 @@ def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) ->
     except ImportError:
         error_msg = "GitPython not installed. Run: pip install GitPython>=3.1.40"
         print(f"\n❌ ERROR: {error_msg}")
-        return json.dumps({"status": "error", "error": error_msg})
+        return GitCommitPushResult(status="error", error=error_msg)
     
     try:
         print(f"   Repository: {repo_path}")
@@ -1576,45 +1631,45 @@ def git_commit_and_push(repo_path: str, resource_name: str, branch_name: str) ->
             print(f"   ⚠️  Could not verify push: {str(e)}")
             print(f"   (Push may still be successful)")
         
-        result = {
-            "status": "success",
-            "commit_hash": commit.hexsha,
-            "commit_hash_short": commit_hash,
-            "branch_name": branch_name,
-            "resource_name": resource_name,
-            "files_changed": len(modified_files) + len(untracked_files),
-            "commit_message": commit_message
-        }
+        result = GitCommitPushResult(
+            status="success",
+            commit_hash=commit.hexsha,
+            commit_hash_short=commit_hash,
+            branch_name=branch_name,
+            resource_name=resource_name,
+            files_changed=len(modified_files) + len(untracked_files),
+            commit_message=commit_message
+        )
         
         print("\n" + "-"*80)
         print("✅ GIT COMMIT AND PUSH COMPLETED")
         print(f"   Commit: {commit_hash}")
         print(f"   Branch: {branch_name}")
-        print(f"   Files changed: {result['files_changed']}")
+        print(f"   Files changed: {result.files_changed}")
         print("="*80 + "\n")
         
-        return json.dumps(result)
+        return result
     
     except ValueError as e:
         print("\n" + "-"*80)
         print("❌ GIT COMMIT AND PUSH FAILED - Validation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return GitCommitPushResult(status="error", error=str(e))
     
     except git.exc.GitCommandError as e:
         print("\n" + "-"*80)
         print("❌ GIT COMMIT AND PUSH FAILED - Git operation error")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": f"Git operation failed: {str(e)}"})
+        return GitCommitPushResult(status="error", error=f"Git operation failed: {str(e)}")
     
     except Exception as e:
         print("\n" + "-"*80)
         print("❌ GIT COMMIT AND PUSH FAILED")
         print(f"   Error: {str(e)}")
         print("="*80 + "\n")
-        return json.dumps({"status": "error", "error": str(e)})
+        return GitCommitPushResult(status="error", error=str(e))
 
 
 class PRWorkspaceCleanup:
