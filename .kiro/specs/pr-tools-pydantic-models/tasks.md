@@ -18,8 +18,8 @@ This plan implements Pydantic data models for all function interactions in `agen
   - **Property: All PR models inherit from TANGOBaseModel**
   - **Validates: Requirements 1.2, 15.1**
 
-- [-] 2. Implement input models for tool parameters
-  - [ ] 2.1 Create S3LinksInput model
+- [x] 2. Implement input models for tool parameters
+  - [x] 2.1 Create S3LinksInput model
     - Define S3LinksInput class inheriting from TANGOBaseModel
     - Add s3_terraform_link field with min_length=1 validation
     - Add s3_template_link field with min_length=1 validation
@@ -31,7 +31,7 @@ This plan implements Pydantic data models for all function interactions in `agen
     - **Property 4: Non-Empty String Validation**
     - **Validates: Requirements 5.2**
   
-  - [ ] 2.3 Create FileContentInput model
+  - [x] 2.3 Create FileContentInput model
     - Define FileContentInput class inheriting from TANGOBaseModel
     - Add terraform_code field with min_length=1 validation
     - Add template field with min_length=1 validation
@@ -43,7 +43,7 @@ This plan implements Pydantic data models for all function interactions in `agen
     - **Property 3: Pattern Validation**
     - **Validates: Requirements 2.6, 8.3**
   
-  - [ ] 2.5 Create PRContentInput model
+  - [x] 2.5 Create PRContentInput model
     - Define PRContentInput class inheriting from TANGOBaseModel
     - Add service_name field
     - Add provider_version field with pattern validation `^\d+\.\d+\.\d+$`
@@ -57,7 +57,7 @@ This plan implements Pydantic data models for all function interactions in `agen
     - **Property 3: Pattern Validation (provider_version)**
     - **Validates: Requirements 5.8, 10.2**
   
-  - [ ] 2.7 Create PRStatusInput model
+  - [x] 2.7 Create PRStatusInput model
     - Define PRStatusInput class inheriting from TANGOBaseModel
     - Add resource_name field with pattern validation `^awscc_[a-z0-9_]+$`
     - Add optional pr_url field
