@@ -13,23 +13,61 @@ from typing import Dict, List, Set
 import config
 
 def get_processed_resources() -> Set[str]:
-    """Get list of processed resources from DynamoDB."""
+    """
+    Get list of processed resources from DynamoDB.
+    
+    A resource is considered processed if it has at least one entry with 
+    status='success' or status='failed'. This prevents infinite retries of 
+    failed resources while allowing new resources to be processed.
+    
+    Returns:
+        Set of resource names that have been processed (success or failed)
+    """
     try:
         dynamodb = boto3.client('dynamodb', region_name=config.AWS_REGION)
         
+        # Scan the table to get all items
         response = dynamodb.scan(
             TableName=config.DYNAMODB_TABLE,
-            ProjectionExpression='resource_name'
+            ProjectionExpression='resource_name, #status',
+            ExpressionAttributeNames={
+                '#status': 'status'
+            }
         )
         
+        # Track resources with successful or failed entries
         processed = set()
+        
         for item in response.get('Items', []):
-            if 'resource_name' in item and 'S' in item['resource_name']:
-                processed.add(item['resource_name']['S'])
+            resource_name = item.get('resource_name', {}).get('S')
+            status = item.get('status', {}).get('S')
+            
+            # Consider resources with success or failed status as "processed"
+            if resource_name and status in ('success', 'failed'):
+                processed.add(resource_name)
+        
+        # Handle pagination if there are more items
+        while 'LastEvaluatedKey' in response:
+            response = dynamodb.scan(
+                TableName=config.DYNAMODB_TABLE,
+                ProjectionExpression='resource_name, #status',
+                ExpressionAttributeNames={
+                    '#status': 'status'
+                },
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            
+            for item in response.get('Items', []):
+                resource_name = item.get('resource_name', {}).get('S')
+                status = item.get('status', {}).get('S')
+                
+                if resource_name and status in ('success', 'failed'):
+                    processed.add(resource_name)
         
         return processed
+        
     except Exception as e:
-        print(f"Warning: Could not access DynamoDB: {e}")
+        print(f"⚠️  Warning: Could not access DynamoDB: {e}")
         return set()
 
 def get_github_releases() -> List[Dict]:
@@ -98,9 +136,25 @@ def discovery_agent(query: str) -> str:
     Returns:
         JSON string with resource name and provider version
     """
+    print("\n" + "="*80)
+    print("🔍 DISCOVERY AGENT - STARTING")
+    print("="*80)
+    
     try:
         result = find_unprocessed_resource()
+        
+        print("\n" + "-"*80)
+        print("✅ DISCOVERY AGENT - COMPLETED")
+        print(f"   Resource: {result.get('resource_name', 'N/A')}")
+        print(f"   Provider Version: {result.get('provider_version', 'N/A')}")
+        print("="*80 + "\n")
+        
         return json.dumps(result)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ DISCOVERY AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         error_result = {"resource_name": "ERROR", "provider_version": "ERROR", "error": str(e)}
         return json.dumps(error_result)

@@ -2,3 +2,7 @@ strands-agents>=0.1.0
 strands-agents-tools>=0.1.0
 requests>=2.31.0
 boto3>=1.26.0
+botocore[crt]
+python-dotenv>=1.0.0
+GitPython>=3.1.40
+PyGithub>=2.1.1

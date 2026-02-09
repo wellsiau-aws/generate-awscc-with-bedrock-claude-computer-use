@@ -61,3 +61,8 @@ TODO.md
 .idea
 .venv
 .env
+repl_state/repl_state.pkl
+results*
+docs/*
+pr_workspace*
+terraform_test*

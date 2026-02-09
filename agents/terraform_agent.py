@@ -1,17 +1,84 @@
 """
 TANGO Multi-Agent Pipeline - Terraform Agent
 Specialized agent for executing Terraform lifecycle operations with real AWS deployment
+
+todo: add MCP support
 """
 
 from strands import Agent, tool
 from strands_tools import python_repl, shell
+import config
+from .resource_tools import check_resource_status, fetch_example_code, list_available_examples
 
 TERRAFORM_SYSTEM_PROMPT = """
 You are a specialized Terraform validation agent for AWS CloudControl resources.
 
+YOUR ROLE: Code Corrector
+You receive a workspace from documentation_agent and use it to validate/correct code.
+
 YOUR TASK:
 Execute complete Terraform validation lifecycle using AWSCC provider with the correct version.
 NEVER substitute with different resource types - ONLY use the target resource.
+
+TOOLS AVAILABLE FOR SUPPLEMENTAL RESOURCES:
+1. check_resource_status(resource_name) - Check if an AWSCC resource has been validated
+2. fetch_example_code(resource_name) - Get working example code from S3
+3. list_available_examples(prefix) - Browse available AWSCC examples
+
+SUPPLEMENTAL RESOURCE STRATEGY:
+When you need to add dependency resources to fix validation errors:
+
+1. PREFER AWSCC RESOURCES:
+   - First, try to use AWSCC versions of supplemental resources
+   - Example: Use awscc_vpc instead of aws_vpc
+
+2. CHECK VALIDATION STATUS:
+   - Use check_resource_status() to see if the AWSCC version has been validated
+   - If status is "success": Use it confidently
+   - If status is "failed": Fall back to AWS provider version
+   - If status is "not_found": You can try AWSCC, but it's untested
+
+3. REUSE WORKING EXAMPLES:
+   - If check_resource_status() shows "success", use fetch_example_code() to get working code
+   - Integrate the fetched code as your supplemental resource
+   - Extract only the resource block you need
+
+4. DOCUMENT YOUR CHOICES:
+   - If using AWS provider for supplemental resources, add a comment explaining why
+   - Example: "# Using aws_vpc because awscc_vpc validation failed"
+
+CRITICAL WORKING DIRECTORY REQUIREMENT:
+- ALWAYS use the directory: {config.TERRAFORM_WORK_DIR}
+- This directory was created by documentation_agent - REUSE IT
+- Do NOT recreate the directory if it already exists
+- Do NOT run terraform init if .terraform/ already exists
+- LEAVE {config.TERRAFORM_WORK_DIR} ready for next agent (DO NOT CLEAN UP)
+
+WORKSPACE REUSE LOGIC:
+1. Check if {config.TERRAFORM_WORK_DIR} exists and is valid:
+   - Has .terraform/ directory → Providers already downloaded, skip init
+   - Has main.tf → Review it first before modifying
+   - Has .terraform.lock.hcl → Providers locked, ready to use
+
+2. If workspace is valid:
+   - READ existing {config.TERRAFORM_WORK_DIR}/main.tf first
+   - Compare with the terraform code you received
+   - If they're the same or similar → Use existing, no update needed
+   - If different → Update main.tf with new code
+   - Skip terraform init (already done by documentation_agent)
+   - Proceed directly to validate/plan/apply
+
+3. If workspace is invalid or missing:
+   - Create fresh {config.TERRAFORM_WORK_DIR}
+   - Create main.tf with provider blocks
+   - Run terraform init
+   - Then proceed with validation
+
+CRITICAL: REVIEW BEFORE MODIFYING
+- ALWAYS read existing main.tf before deciding to update it
+- Documentation agent may have already created the correct code
+- Only update if the code is different or needs corrections
+- Don't blindly overwrite - be smart about reuse
 
 INPUT FORMAT:
 You will receive terraform code AND provider version information. Extract both pieces of information.
@@ -23,14 +90,32 @@ CRITICAL PROVIDER REQUIREMENTS:
 
 MANDATORY STEPS (IN ORDER):
 1. Extract terraform code and provider version from input
-2. Create test directory and main.tf with terraform code
-3. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id), create the required supporting AWSCC resources and use proper resource references
-4. terraform init
-5. terraform validate (fix syntax errors if needed)
-6. terraform plan
-7. **terraform apply -auto-approve** (MANDATORY - create real AWS resources)
-8. **terraform destroy -auto-approve** (MANDATORY - clean up resources)
-9. Remove test directory completely (MANDATORY cleanup)
+
+2. Check if {config.TERRAFORM_WORK_DIR} is valid:
+   - If valid: READ existing main.tf first, compare, update only if needed ✅ SMART
+   - If invalid: Create fresh, run init
+
+3. If update needed: Update main.tf in {config.TERRAFORM_WORK_DIR} with terraform code
+   If no update needed: Use existing main.tf as-is
+
+4. **ADD DEPENDENCY RESOURCES IF NECESSARY** - If the target resource references non-existent resources (like volume_id, vpc_id, subnet_id):
+   - First check if AWSCC version exists using check_resource_status()
+   - If successful, fetch and use the AWSCC version
+   - If failed or not found, use AWS provider version with explanatory comment
+   - Create the required supporting resources and use proper resource references
+
+5. Run terraform validate in {config.TERRAFORM_WORK_DIR} (fix syntax errors if needed)
+
+6. Run terraform plan in {config.TERRAFORM_WORK_DIR}
+
+7. **terraform apply -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - create real AWS resources)
+
+8. **terraform destroy -auto-approve** in {config.TERRAFORM_WORK_DIR} (MANDATORY - clean up resources)
+
+9. LEAVE WORKSPACE READY:
+   - DO NOT remove {config.TERRAFORM_WORK_DIR}
+   - Validation agent will reuse this workspace
+   - Your job is to correct code, not tear down workspace
 
 FAILURE HANDLING:
 - If terraform apply fails, analyze the error and try to fix the SAME resource type only
@@ -60,19 +145,66 @@ def terraform_agent(terraform_code_and_version: str) -> str:
     Returns:
         Corrected Terraform code after validation OR failure message
     """
+    print("\n" + "="*80)
+    print("🔧 TERRAFORM AGENT - STARTING")
+    print("="*80)
+    
     try:
+        # Create system prompt with actual config values
+        system_prompt = TERRAFORM_SYSTEM_PROMPT.replace(
+            "{config.TERRAFORM_WORK_DIR}", config.TERRAFORM_WORK_DIR
+        )
+        
         agent = Agent(
-            system_prompt=TERRAFORM_SYSTEM_PROMPT,
-            tools=[shell, python_repl]
+            system_prompt=system_prompt,
+            tools=[shell, python_repl, check_resource_status, fetch_example_code, list_available_examples]
         )
         
         terraform_query = f"""
-        Execute complete Terraform validation with correct provider version and return the corrected code:
+        Execute complete Terraform validation with correct provider version and return the corrected code.
         
+        CRITICAL REUSE INSTRUCTIONS:
+        The documentation_agent has already created and initialized {config.TERRAFORM_WORK_DIR}.
+        
+        IMPORTANT - REVIEW BEFORE MODIFYING:
+        1. Check if {config.TERRAFORM_WORK_DIR} exists and has .terraform/ directory
+        2. If yes: READ the existing main.tf file first
+        3. Compare existing main.tf with the terraform code you received
+        4. If they're the same or very similar: Use existing, no update needed (saves time!)
+        5. If different or needs corrections: Update main.tf with new code
+        6. Skip terraform init if .terraform/ exists (saves 30 seconds!)
+        7. Run validation, apply, destroy
+        8. LEAVE {config.TERRAFORM_WORK_DIR} ready for validation_agent (DO NOT CLEAN UP)
+        
+        Don't blindly overwrite main.tf - review it first and only update if necessary.
+        Documentation agent may have already created the correct code.
+        
+        Validation agent will REUSE your workspace.
+        DO NOT remove {config.TERRAFORM_WORK_DIR} - validation agent needs it!
+        
+        Terraform code and version:
         {terraform_code_and_version}
         """
         
         response = agent(terraform_query)
+        
+        # Check if it's a failure or success
+        if "TERRAFORM_LIFECYCLE_FAILED" in str(response):
+            print("\n" + "-"*80)
+            print("❌ TERRAFORM AGENT - FAILED")
+            print(f"   Terraform lifecycle validation failed")
+            print("="*80 + "\n")
+        else:
+            print("\n" + "-"*80)
+            print("✅ TERRAFORM AGENT - COMPLETED")
+            print(f"   Terraform code validated and corrected")
+            print("="*80 + "\n")
+        
         return str(response)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ TERRAFORM AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         return f"Error in terraform agent: {str(e)}"

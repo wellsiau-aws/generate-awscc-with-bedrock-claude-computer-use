@@ -83,31 +83,39 @@ DYNAMODB SCHEMA ({config.DYNAMODB_TABLE} table):
 - resource_name (Partition Key): AWS CloudControl resource name
 - timestamp (Sort Key): Unix timestamp
 - status: "success" or "failed"
+- source: "tango_pipeline" (identifies entries created by the pipeline)
 - s3_terraform_link: S3 path to terraform file 
   * SUCCESS: examples/resources/{resource_name}/{service_name}.tf
   * FAILED: failed/resources/{resource_name}/{service_name}.tf
-- s3_template_link: S3 path to template file (templates/resources/{resource_name}.md.tmpl)
+- s3_template_link: S3 path to template file (ONLY for success, omit for failures)
+  * SUCCESS: templates/resources/{resource_name}.md.tmpl
+  * FAILED: (not created)
 - s3_analysis_link: S3 path to detailed validation results (analysis/resource/{resource_name}/{date}.txt)
 
 WORKFLOW:
 1. Extract service name from resource_name (remove "awscc_" prefix)
 2. Extract validation results and S3 analysis link from input
-3. Clean up old entries: Query DynamoDB for existing entries with same resource_name and delete them
-4. Use the template_replacer tool to create the resource-specific template:
+3. Determine if execution was SUCCESS or FAILED
+4. Clean up old entries: Query DynamoDB for existing entries with same resource_name and delete them
+5. Store .tf file directly to S3:
+   - SUCCESS: examples/resources/{resource_name}/{service_name}.tf
+   - FAILED: failed/resources/{resource_name}/{service_name}.tf
+6. ONLY FOR SUCCESS: Generate and store template:
+   - Use the template_replacer tool to create the resource-specific template
    - Reads generic template from S3: s3://{config.S3_BUCKET}/templates/resources/generic_resource.md.tmpl
    - Pass the resource_name, service_name, a brief description, and a descriptive heading
-   - The tool will handle reading the generic template and doing exact replacements
-   - It will validate the output format automatically
-5. Store template directly to S3
-6. Store .tf file directly to S3
+   - Store template to S3 at templates/resources/{service_name}.md.tmpl
 7. Create simplified DynamoDB entry with:
    - resource_name (partition key)
    - timestamp (sort key)
    - status (success/failed)
+   - source (always set to "tango_pipeline")
    - s3_terraform_link
-   - s3_template_link
+   - s3_template_link (ONLY for success, omit for failures)
    - s3_analysis_link (from validation agent)
 8. Return structured summary
+
+CRITICAL: DO NOT create templates for failed executions. Templates are only for successful examples that can be used in pull requests.
 
 TEMPLATE REPLACEMENT EXAMPLES:
 - For awscc_s3_bucket: description="Create an S3 bucket with versioning and encryption", heading="Create an S3 bucket"
@@ -122,9 +130,11 @@ Status: [SUCCESS/FAILED]
 
 Storage:
 - Stored Terraform code in S3 at {s3_terraform_link}
-- Stored template in S3 at {s3_template_link}
+- Stored template in S3 at {s3_template_link} (ONLY for SUCCESS)
 - Stored validation analysis in S3 at {s3_analysis_link}
 - Logged execution details to DynamoDB with S3 links
+
+Note: Templates are only created for successful executions to avoid triggering artifacts for pull requests.
 ========================================
 """
 
@@ -139,6 +149,10 @@ def storage_agent(storage_request: str) -> str:
     Returns:
         Storage confirmation with DynamoDB and S3 locations
     """
+    print("\n" + "="*80)
+    print("💾 STORAGE AGENT - STARTING")
+    print("="*80)
+    
     try:
         template_replacer = create_template_replacement_tool()
         
@@ -157,6 +171,17 @@ def storage_agent(storage_request: str) -> str:
         )
         
         response = agent(storage_request)
+        
+        print("\n" + "-"*80)
+        print("✅ STORAGE AGENT - COMPLETED")
+        print(f"   Stored results in DynamoDB and S3")
+        print("="*80 + "\n")
+        
         return str(response)
     except Exception as e:
+        print("\n" + "-"*80)
+        print("❌ STORAGE AGENT - FAILED")
+        print(f"   Error: {str(e)}")
+        print("="*80 + "\n")
+        
         return f"Error in storage agent: {str(e)}"
